@@ -513,7 +513,7 @@ func TestServerProcessOrphans(t *testing.T) {
 	server := &Server{
 		logger:          logger,
 		settings:        tSettings,
-		orphanage:       expiringmap.New[chainhash.Hash, *bt.Tx](time.Minute),
+		orphanage:       NewOrphanage(time.Minute, 100, &logger),
 		validatorClient: &mockValidator{},
 		stats:           gocore.NewStat("test"),
 	}

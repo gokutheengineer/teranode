@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/IBM/sarama"
-	"github.com/bsv-blockchain/go-bt/v2"
 	"github.com/bsv-blockchain/go-bt/v2/chainhash"
 	"github.com/bsv-blockchain/teranode/errors"
 	"github.com/bsv-blockchain/teranode/model"
@@ -23,7 +22,6 @@ import (
 	kafkamessage "github.com/bsv-blockchain/teranode/util/kafka/kafka_message"
 	"github.com/bsv-blockchain/teranode/util/test"
 	"github.com/jarcoal/httpmock"
-	"github.com/ordishs/go-utils/expiringmap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -226,7 +224,7 @@ func TestSubtreesHandler(t *testing.T) {
 					subtreeStore:        subtreeStore,
 					utxoStore:           utxoStore,
 					validatorClient:     &validator.MockValidator{},
-					orphanage:           expiringmap.New[chainhash.Hash, *bt.Tx](tSettings.SubtreeValidation.OrphanageTimeout),
+					orphanage:           NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger),
 					currentBlockIDsMap:  atomic.Pointer[map[uint32]bool]{},
 					bestBlockHeader:     atomic.Pointer[model.BlockHeader]{},
 					bestBlockHeaderMeta: atomic.Pointer[model.BlockHeaderMeta]{},

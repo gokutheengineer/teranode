@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/bsv-blockchain/go-bt/v2"
 	"github.com/bsv-blockchain/go-bt/v2/chainhash"
 	subtreepkg "github.com/bsv-blockchain/go-subtree"
 	"github.com/bsv-blockchain/teranode/errors"
@@ -117,8 +116,8 @@ type Server struct {
 	// invalidSubtreeDeDuplicateMap is used to de-duplicate invalid subtree messages
 	invalidSubtreeDeDuplicateMap *expiringmap.ExpiringMap[string, struct{}]
 
-	// orphanage is used to store transactions that are missing parents that can be validated later
-	orphanage *expiringmap.ExpiringMap[chainhash.Hash, *bt.Tx]
+	// orphanage manages orphaned transactions that are missing their parent transactions
+	orphanage *Orphanage
 
 	// orphanageLock is used to make sure we only process the orphanage once at a time
 	orphanageLock sync.Mutex
@@ -195,16 +194,10 @@ func New(
 		subtreeConsumerClient:             subtreeConsumerClient,
 		txmetaConsumerClient:              txmetaConsumerClient,
 		invalidSubtreeDeDuplicateMap:      expiringmap.New[string, struct{}](time.Minute * 1),
-		orphanage:                         expiringmap.New[chainhash.Hash, *bt.Tx](tSettings.SubtreeValidation.OrphanageTimeout),
+		orphanage:                         NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger),
 	}
 
 	var err error
-
-	u.orphanage.WithEvictionFunction(func(hash chainhash.Hash, tx *bt.Tx) bool {
-		u.logger.Debugf("[SubtreeValidation] Orphanage eviction for tx %s", hash.String())
-
-		return false
-	})
 
 	once.Do(func() {
 		quorumPath := tSettings.SubtreeValidation.QuorumPath
@@ -805,9 +798,11 @@ func (u *Server) checkSubtreeFromBlock(ctx context.Context, request *subtreevali
 
 	if subtree != nil {
 		// remove all transactions that are part of the subtree from the orphanage
+		u.orphanageLock.Lock()
 		for _, node := range subtree.Nodes {
 			u.orphanage.Delete(node.Hash)
 		}
+		u.orphanageLock.Unlock()
 	}
 
 	u.processOrphans(ctx, *blockHash, request.BlockHeight, blockIds)
