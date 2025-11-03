@@ -154,11 +154,9 @@ func (u *Server) subtreesHandler(msg *kafka.KafkaMessage) error {
 		}
 
 		// if no error was thrown, remove all the transactions from this subtree from the orphanage
-		u.orphanageLock.Lock()
 		for _, node := range subtree.Nodes {
 			u.orphanage.Delete(node.Hash)
 		}
-		u.orphanageLock.Unlock()
 	}
 
 	return nil

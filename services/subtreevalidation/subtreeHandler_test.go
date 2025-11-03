@@ -218,13 +218,17 @@ func TestSubtreesHandler(t *testing.T) {
 
 			server := &testServer{
 				Server: Server{
-					logger:              logger,
-					settings:            tSettings,
-					blockchainClient:    blockchainClient,
-					subtreeStore:        subtreeStore,
-					utxoStore:           utxoStore,
-					validatorClient:     &validator.MockValidator{},
-					orphanage:           NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger),
+					logger:           logger,
+					settings:         tSettings,
+					blockchainClient: blockchainClient,
+					subtreeStore:     subtreeStore,
+					utxoStore:        utxoStore,
+					validatorClient:  &validator.MockValidator{},
+					orphanage: func() *Orphanage {
+						o, err := NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger)
+						require.NoError(t, err)
+						return o
+					}(),
 					currentBlockIDsMap:  atomic.Pointer[map[uint32]bool]{},
 					bestBlockHeader:     atomic.Pointer[model.BlockHeader]{},
 					bestBlockHeaderMeta: atomic.Pointer[model.BlockHeaderMeta]{},

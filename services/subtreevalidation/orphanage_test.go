@@ -22,8 +22,10 @@ func createUniqueTx(baseTx *bt.Tx, nonce uint32) *bt.Tx {
 
 // createTestServer creates a server with a test configuration
 func createTestServer(t *testing.T, maxSize int) *Server {
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, &ulogger.TestLogger{})
+	require.NoError(t, err, "Failed to create orphanage")
 	return &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, &ulogger.TestLogger{}),
+		orphanage: orphanage,
 		logger:    &ulogger.TestLogger{},
 	}
 }
@@ -36,8 +38,10 @@ func createTestServer(t *testing.T, maxSize int) *Server {
 func TestOrphanageBasicOperations(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -74,8 +78,10 @@ func TestOrphanageSizeLimit(t *testing.T) {
 	maxSize := 5
 
 	// Create a server with a small orphanage max size for testing
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -110,8 +116,10 @@ func TestOrphanageRejectionPreventsParentRemoval(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 3
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -154,8 +162,10 @@ func TestOrphanageRejectionPreventsParentRemoval(t *testing.T) {
 func TestOrphanageLockingSetAndGet(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -164,18 +174,14 @@ func TestOrphanageLockingSetAndGet(t *testing.T) {
 	require.NoError(t, err)
 	txHash := *tx.TxIDChainHash()
 
-	// Test Set with lock
-	server.orphanageLock.Lock()
+	// Test Set (with internal locking)
 	added := server.orphanage.Set(txHash, tx)
-	server.orphanageLock.Unlock()
 
 	assert.True(t, added, "Transaction should be added")
 
-	// Test Get with lock
-	server.orphanageLock.Lock()
+	// Test Get (with internal locking)
 	retrieved, exists := server.orphanage.Get(txHash)
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.True(t, exists, "Transaction should exist")
 	assert.Equal(t, 1, length, "Orphanage should have 1 transaction")
@@ -186,8 +192,10 @@ func TestOrphanageLockingSetAndGet(t *testing.T) {
 func TestOrphanageLockingDelete(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -196,20 +204,14 @@ func TestOrphanageLockingDelete(t *testing.T) {
 	txHash := *tx.TxIDChainHash()
 
 	// Add transaction
-	server.orphanageLock.Lock()
 	server.orphanage.Set(txHash, tx)
-	server.orphanageLock.Unlock()
 
-	// Delete with lock
-	server.orphanageLock.Lock()
+	// Delete (with internal locking)
 	server.orphanage.Delete(txHash)
-	server.orphanageLock.Unlock()
 
 	// Verify deletion
-	server.orphanageLock.Lock()
 	_, exists := server.orphanage.Get(txHash)
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.False(t, exists, "Transaction should not exist after deletion")
 	assert.Equal(t, 0, length, "Orphanage should be empty")
@@ -219,8 +221,10 @@ func TestOrphanageLockingDelete(t *testing.T) {
 func TestOrphanageLockingMultipleDeletes(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -231,32 +235,24 @@ func TestOrphanageLockingMultipleDeletes(t *testing.T) {
 	const count = 10
 	var txHashes []chainhash.Hash
 
-	server.orphanageLock.Lock()
 	for i := 0; i < count; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		txHash := *tx.TxIDChainHash()
 		server.orphanage.Set(txHash, tx)
 		txHashes = append(txHashes, txHash)
 	}
-	server.orphanageLock.Unlock()
 
 	// Verify all added
-	server.orphanageLock.Lock()
 	initialLength := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 	assert.Equal(t, count, initialLength)
 
-	// Delete all transactions with lock (simulating subtree validation completion)
-	server.orphanageLock.Lock()
+	// Delete all transactions (simulating subtree validation completion)
 	for _, txHash := range txHashes {
 		server.orphanage.Delete(txHash)
 	}
-	server.orphanageLock.Unlock()
 
 	// Verify all deleted
-	server.orphanageLock.Lock()
 	finalLength := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.Equal(t, 0, finalLength, "All transactions should be deleted")
 }
@@ -266,29 +262,27 @@ func TestOrphanageLockingFullQueue(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 5
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
 	baseTx, err := createTestTransaction("base")
 	require.NoError(t, err)
 
-	// Fill orphanage with lock
-	server.orphanageLock.Lock()
+	// Fill orphanage
 	for i := 0; i < maxSize; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		added := server.orphanage.Set(*tx.TxIDChainHash(), tx)
 		assert.True(t, added, "Should be able to add transaction %d", i)
 	}
-	server.orphanageLock.Unlock()
 
-	// Try to add more with lock (should be rejected)
-	server.orphanageLock.Lock()
+	// Try to add more (should be rejected)
 	tx := createUniqueTx(baseTx, uint32(999))
 	added := server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.False(t, added, "Should reject when full")
 	assert.Equal(t, maxSize, length, "Should still be at maxSize")
@@ -298,8 +292,10 @@ func TestOrphanageLockingFullQueue(t *testing.T) {
 func TestOrphanageLockingItems(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -308,18 +304,14 @@ func TestOrphanageLockingItems(t *testing.T) {
 
 	// Add transactions
 	const count = 5
-	server.orphanageLock.Lock()
 	for i := 0; i < count; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
-	// Get items with lock
-	server.orphanageLock.Lock()
+	// Get items
 	items := server.orphanage.Items()
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.Equal(t, count, length, "Should have correct number of items")
 	assert.Equal(t, count, len(items), "Items() should return all transactions")
@@ -329,8 +321,10 @@ func TestOrphanageLockingItems(t *testing.T) {
 func TestOrphanageLockingProcessOrphansPattern(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -339,34 +333,25 @@ func TestOrphanageLockingProcessOrphansPattern(t *testing.T) {
 
 	// Add orphans
 	const count = 5
-	server.orphanageLock.Lock()
 	for i := 0; i < count; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
-	// Simulate processOrphans pattern: hold lock, get initial length, get items
-	server.orphanageLock.Lock()
+	// Simulate processOrphans pattern: get initial length and items
 	initialLength := server.orphanage.Len()
 	orphanTxs := server.orphanage.Items()
-	server.orphanageLock.Unlock()
 
 	assert.Equal(t, count, initialLength)
 	assert.Equal(t, count, len(orphanTxs))
 
-	// Simulate processing and deleting orphans (note: in real code, deletes happen
-	// after validation completes, and the lock is acquired per-delete)
+	// Simulate processing and deleting orphans
 	for _, tx := range orphanTxs {
-		server.orphanageLock.Lock()
 		server.orphanage.Delete(*tx.TxIDChainHash())
-		server.orphanageLock.Unlock()
 	}
 
 	// Verify all processed
-	server.orphanageLock.Lock()
 	finalLength := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.Equal(t, 0, finalLength, "All orphans should be processed and removed")
 }
@@ -375,8 +360,10 @@ func TestOrphanageLockingProcessOrphansPattern(t *testing.T) {
 func TestOrphanageLockingConcurrentOperations(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
+	orphanage, err := NewOrphanage(15*time.Minute, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -395,9 +382,7 @@ func TestOrphanageLockingConcurrentOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				tx := createUniqueTx(baseTx, uint32(id*1000+j))
-				server.orphanageLock.Lock()
 				server.orphanage.Set(*tx.TxIDChainHash(), tx)
-				server.orphanageLock.Unlock()
 			}
 		}(i)
 	}
@@ -408,9 +393,7 @@ func TestOrphanageLockingConcurrentOperations(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				tx := createUniqueTx(baseTx, uint32(id*1000+j))
-				server.orphanageLock.Lock()
 				server.orphanage.Delete(*tx.TxIDChainHash())
-				server.orphanageLock.Unlock()
 			}
 		}(i)
 	}
@@ -418,9 +401,7 @@ func TestOrphanageLockingConcurrentOperations(t *testing.T) {
 	wg.Wait()
 
 	// Verify no race conditions occurred (test passes if no panic)
-	server.orphanageLock.Lock()
 	_ = server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	t.Log("Concurrent operations completed successfully")
 }
@@ -450,9 +431,7 @@ func TestOrphanageConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				tx := createUniqueTx(baseTx, uint32(id*1000+j))
-				server.orphanageLock.Lock()
 				server.orphanage.Set(*tx.TxIDChainHash(), tx)
-				server.orphanageLock.Unlock()
 			}
 		}(i)
 	}
@@ -463,9 +442,7 @@ func TestOrphanageConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				tx := createUniqueTx(baseTx, uint32(id*1000+j))
-				server.orphanageLock.Lock()
 				_, _ = server.orphanage.Get(*tx.TxIDChainHash())
-				server.orphanageLock.Unlock()
 			}
 		}(i)
 	}
@@ -476,9 +453,7 @@ func TestOrphanageConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < operationsPerGoroutine; j++ {
 				tx := createUniqueTx(baseTx, uint32(id*1000+j))
-				server.orphanageLock.Lock()
 				server.orphanage.Delete(*tx.TxIDChainHash())
-				server.orphanageLock.Unlock()
 			}
 		}(i)
 	}
@@ -521,32 +496,24 @@ func TestOrphanageMixedOperations(t *testing.T) {
 				txHash := *tx.TxIDChainHash()
 
 				// Add transaction
-				server.orphanageLock.Lock()
 				added := server.orphanage.Set(txHash, tx)
-				server.orphanageLock.Unlock()
 
 				if added {
 					// Try to get it back
-					server.orphanageLock.Lock()
 					retrieved, exists := server.orphanage.Get(txHash)
-					server.orphanageLock.Unlock()
 
 					if exists {
 						assert.Equal(t, tx.TxID(), retrieved.TxID())
 
 						// Sometimes delete it
 						if i%2 == 0 {
-							server.orphanageLock.Lock()
 							server.orphanage.Delete(txHash)
-							server.orphanageLock.Unlock()
 						}
 					}
 				}
 
 				// Check length (should not cause race)
-				server.orphanageLock.Lock()
 				_ = server.orphanage.Len()
-				server.orphanageLock.Unlock()
 			}
 		}(worker)
 	}
@@ -577,16 +544,12 @@ func TestOrphanageNoDeadlockOnFullQueue(t *testing.T) {
 	// Fill the orphanage
 	for i := 0; i < maxSize; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
-		server.orphanageLock.Lock()
 		added := server.orphanage.Set(*tx.TxIDChainHash(), tx)
-		server.orphanageLock.Unlock()
 		assert.True(t, added, "Should be able to add transaction %d", i)
 	}
 
 	// Verify it's full
-	server.orphanageLock.Lock()
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 	assert.Equal(t, maxSize, length)
 
 	// Now try to add more from multiple goroutines - should not deadlock
@@ -601,9 +564,7 @@ func TestOrphanageNoDeadlockOnFullQueue(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
 				tx := createUniqueTx(baseTx, uint32(maxSize+id*100+j))
-				server.orphanageLock.Lock()
 				added := server.orphanage.Set(*tx.TxIDChainHash(), tx)
-				server.orphanageLock.Unlock()
 				rejected <- !added
 			}
 		}(i)
@@ -668,9 +629,7 @@ func TestOrphanageStressTest(t *testing.T) {
 					return
 				default:
 					tx := createUniqueTx(baseTx, uint32(id*100000+counter))
-					server.orphanageLock.Lock()
 					server.orphanage.Set(*tx.TxIDChainHash(), tx)
-					server.orphanageLock.Unlock()
 					counter++
 				}
 			}
@@ -689,11 +648,9 @@ func TestOrphanageStressTest(t *testing.T) {
 					return
 				default:
 					tx := createUniqueTx(baseTx, uint32(id*100000+counter))
-					server.orphanageLock.Lock()
 					_, _ = server.orphanage.Get(*tx.TxIDChainHash())
 					_ = server.orphanage.Len()
 					_ = server.orphanage.Items()
-					server.orphanageLock.Unlock()
 					counter++
 				}
 			}
@@ -712,9 +669,7 @@ func TestOrphanageStressTest(t *testing.T) {
 					return
 				default:
 					tx := createUniqueTx(baseTx, uint32(id*100000+counter))
-					server.orphanageLock.Lock()
 					server.orphanage.Delete(*tx.TxIDChainHash())
-					server.orphanageLock.Unlock()
 					counter++
 				}
 			}
@@ -741,50 +696,50 @@ func TestOrphanageStressTest(t *testing.T) {
 }
 
 // ============================================================================
-// NewOrphanage Panic Tests
+// NewOrphanage Error Tests
 // ============================================================================
 
-// TestNewOrphanage_PanicOnNilLogger tests that NewOrphanage panics when logger is nil
-func TestNewOrphanage_PanicOnNilLogger(t *testing.T) {
-	assert.Panics(t, func() {
-		NewOrphanage(15*time.Minute, 100, nil)
-	}, "NewOrphanage should panic when logger is nil")
+// TestNewOrphanage_ErrorOnNilLogger tests that NewOrphanage returns error when logger is nil
+func TestNewOrphanage_ErrorOnNilLogger(t *testing.T) {
+	_, err := NewOrphanage(15*time.Minute, 100, nil)
+	assert.Error(t, err, "NewOrphanage should return error when logger is nil")
+	assert.Contains(t, err.Error(), "logger")
 }
 
-// TestNewOrphanage_PanicOnZeroMaxSize tests that NewOrphanage panics when maxSize is 0
-func TestNewOrphanage_PanicOnZeroMaxSize(t *testing.T) {
+// TestNewOrphanage_ErrorOnZeroMaxSize tests that NewOrphanage returns error when maxSize is 0
+func TestNewOrphanage_ErrorOnZeroMaxSize(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
-	assert.Panics(t, func() {
-		NewOrphanage(15*time.Minute, 0, logger)
-	}, "NewOrphanage should panic when maxSize is 0")
+	_, err := NewOrphanage(15*time.Minute, 0, logger)
+	assert.Error(t, err, "NewOrphanage should return error when maxSize is 0")
+	assert.Contains(t, err.Error(), "maxSize")
 }
 
-// TestNewOrphanage_PanicOnNegativeMaxSize tests that NewOrphanage panics when maxSize is negative
-func TestNewOrphanage_PanicOnNegativeMaxSize(t *testing.T) {
+// TestNewOrphanage_ErrorOnNegativeMaxSize tests that NewOrphanage returns error when maxSize is negative
+func TestNewOrphanage_ErrorOnNegativeMaxSize(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
-	assert.Panics(t, func() {
-		NewOrphanage(15*time.Minute, -1, logger)
-	}, "NewOrphanage should panic when maxSize is negative")
+	_, err := NewOrphanage(15*time.Minute, -1, logger)
+	assert.Error(t, err, "NewOrphanage should return error when maxSize is negative")
+	assert.Contains(t, err.Error(), "maxSize")
 }
 
-// TestNewOrphanage_PanicOnZeroTimeout tests that NewOrphanage panics when timeout is 0
-func TestNewOrphanage_PanicOnZeroTimeout(t *testing.T) {
+// TestNewOrphanage_ErrorOnZeroTimeout tests that NewOrphanage returns error when timeout is 0
+func TestNewOrphanage_ErrorOnZeroTimeout(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
-	assert.Panics(t, func() {
-		NewOrphanage(0, 100, logger)
-	}, "NewOrphanage should panic when timeout is 0")
+	_, err := NewOrphanage(0, 100, logger)
+	assert.Error(t, err, "NewOrphanage should return error when timeout is 0")
+	assert.Contains(t, err.Error(), "timeout")
 }
 
-// TestNewOrphanage_PanicOnNegativeTimeout tests that NewOrphanage panics when timeout is negative
-func TestNewOrphanage_PanicOnNegativeTimeout(t *testing.T) {
+// TestNewOrphanage_ErrorOnNegativeTimeout tests that NewOrphanage returns error when timeout is negative
+func TestNewOrphanage_ErrorOnNegativeTimeout(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
-	assert.Panics(t, func() {
-		NewOrphanage(-1*time.Second, 100, logger)
-	}, "NewOrphanage should panic when timeout is negative")
+	_, err := NewOrphanage(-1*time.Second, 100, logger)
+	assert.Error(t, err, "NewOrphanage should return error when timeout is negative")
+	assert.Contains(t, err.Error(), "timeout")
 }
 
 // ============================================================================
@@ -796,8 +751,10 @@ func TestOrphanageEvictionFunction(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
 	// Create orphanage with very short timeout for testing
+	orphanage, err := NewOrphanage(100*time.Millisecond, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(100*time.Millisecond, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -807,16 +764,12 @@ func TestOrphanageEvictionFunction(t *testing.T) {
 	txHash := *tx.TxIDChainHash()
 
 	// Add transaction to orphanage
-	server.orphanageLock.Lock()
 	added := server.orphanage.Set(txHash, tx)
-	server.orphanageLock.Unlock()
 	require.True(t, added, "Transaction should be added")
 
 	// Verify transaction exists initially
-	server.orphanageLock.Lock()
 	_, exists := server.orphanage.Get(txHash)
 	initialLen := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 	assert.True(t, exists, "Transaction should exist immediately after adding")
 	assert.Equal(t, 1, initialLen, "Orphanage should have 1 transaction")
 
@@ -830,8 +783,10 @@ func TestOrphanageTimeoutConfiguration(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
 	// Create orphanages with different timeouts
-	shortTimeout := NewOrphanage(1*time.Second, 100, logger)
-	longTimeout := NewOrphanage(10*time.Minute, 100, logger)
+	shortTimeout, err := NewOrphanage(1*time.Second, 100, logger)
+	require.NoError(t, err)
+	longTimeout, err := NewOrphanage(10*time.Minute, 100, logger)
+	require.NoError(t, err)
 
 	// Both should be created successfully
 	assert.NotNil(t, shortTimeout, "Orphanage with short timeout should be created")
@@ -847,8 +802,10 @@ func TestOrphanageNoEvictionBeforeTimeout(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 
 	// Create orphanage with longer timeout
+	orphanage, err := NewOrphanage(5*time.Second, 100, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(5*time.Second, 100, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -858,18 +815,14 @@ func TestOrphanageNoEvictionBeforeTimeout(t *testing.T) {
 	txHash := *tx.TxIDChainHash()
 
 	// Add transaction
-	server.orphanageLock.Lock()
 	server.orphanage.Set(txHash, tx)
-	server.orphanageLock.Unlock()
 
 	// Wait a short time (but less than timeout)
 	time.Sleep(100 * time.Millisecond)
 
 	// Verify transaction still exists
-	server.orphanageLock.Lock()
 	_, exists := server.orphanage.Get(txHash)
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 
 	assert.True(t, exists, "Transaction should still exist before timeout")
 	assert.Equal(t, 1, length, "Orphanage should still have the transaction")
@@ -894,7 +847,8 @@ func TestOrphanageMaxSize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			orphanage := NewOrphanage(15*time.Minute, tt.maxSize, logger)
+			orphanage, err := NewOrphanage(15*time.Minute, tt.maxSize, logger)
+			require.NoError(t, err)
 			assert.Equal(t, tt.maxSize, orphanage.MaxSize(), "MaxSize should return the configured value")
 		})
 	}
@@ -905,8 +859,10 @@ func TestOrphanageIsFull(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 3
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -919,9 +875,7 @@ func TestOrphanageIsFull(t *testing.T) {
 	// Add transactions one by one
 	for i := 0; i < maxSize-1; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
-		server.orphanageLock.Lock()
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
-		server.orphanageLock.Unlock()
 
 		// Should not be full yet
 		assert.False(t, server.orphanage.IsFull(), "Orphanage should not be full at %d/%d", i+1, maxSize)
@@ -929,17 +883,13 @@ func TestOrphanageIsFull(t *testing.T) {
 
 	// Add the last transaction to fill it
 	tx := createUniqueTx(baseTx, uint32(maxSize-1))
-	server.orphanageLock.Lock()
 	server.orphanage.Set(*tx.TxIDChainHash(), tx)
-	server.orphanageLock.Unlock()
 
 	// Now it should be full
 	assert.True(t, server.orphanage.IsFull(), "Orphanage should be full at %d/%d", maxSize, maxSize)
 
 	// Remove one transaction
-	server.orphanageLock.Lock()
 	server.orphanage.Delete(*tx.TxIDChainHash())
-	server.orphanageLock.Unlock()
 
 	// Should not be full anymore
 	assert.False(t, server.orphanage.IsFull(), "Orphanage should not be full after removing one transaction")
@@ -950,8 +900,10 @@ func TestOrphanageStats(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 10
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -965,12 +917,10 @@ func TestOrphanageStats(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add 5 transactions (50% full)
-	server.orphanageLock.Lock()
 	for i := 0; i < 5; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
 	currentSize, returnedMaxSize, utilization = server.orphanage.Stats()
 	assert.Equal(t, 5, currentSize, "Current size should be 5")
@@ -978,12 +928,10 @@ func TestOrphanageStats(t *testing.T) {
 	assert.Equal(t, 50.0, utilization, "Utilization should be 50%")
 
 	// Fill to capacity (100% full)
-	server.orphanageLock.Lock()
 	for i := 5; i < maxSize; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
 	currentSize, returnedMaxSize, utilization = server.orphanage.Stats()
 	assert.Equal(t, maxSize, currentSize, "Current size should equal max size")
@@ -996,8 +944,10 @@ func TestOrphanageCleanup(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 10
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -1005,12 +955,10 @@ func TestOrphanageCleanup(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add some transactions
-	server.orphanageLock.Lock()
 	for i := 0; i < 3; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
 	// Call Cleanup - it should log the status without error
 	// This is mainly testing that the method doesn't panic and properly acquires the lock
@@ -1019,9 +967,7 @@ func TestOrphanageCleanup(t *testing.T) {
 	}, "Cleanup should not panic")
 
 	// Verify orphanage state is unchanged after cleanup
-	server.orphanageLock.Lock()
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 	assert.Equal(t, 3, length, "Cleanup should not modify orphanage contents")
 }
 
@@ -1030,8 +976,10 @@ func TestOrphanageCleanupConcurrency(t *testing.T) {
 	logger := &ulogger.TestLogger{}
 	maxSize := 50
 
+	orphanage, err := NewOrphanage(15*time.Minute, maxSize, logger)
+	require.NoError(t, err)
 	server := &Server{
-		orphanage: NewOrphanage(15*time.Minute, maxSize, logger),
+		orphanage: orphanage,
 		logger:    logger,
 	}
 
@@ -1039,12 +987,10 @@ func TestOrphanageCleanupConcurrency(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add some transactions
-	server.orphanageLock.Lock()
 	for i := 0; i < 10; i++ {
 		tx := createUniqueTx(baseTx, uint32(i))
 		server.orphanage.Set(*tx.TxIDChainHash(), tx)
 	}
-	server.orphanageLock.Unlock()
 
 	var wg sync.WaitGroup
 	const numGoroutines = 10
@@ -1061,9 +1007,7 @@ func TestOrphanageCleanupConcurrency(t *testing.T) {
 	wg.Wait()
 
 	// Verify state is still consistent
-	server.orphanageLock.Lock()
 	length := server.orphanage.Len()
-	server.orphanageLock.Unlock()
 	assert.Equal(t, 10, length, "Concurrent Cleanup calls should not affect orphanage contents")
 }
 
@@ -1088,8 +1032,10 @@ func TestOrphanageStatsCalculation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			orphanage, err := NewOrphanage(15*time.Minute, tt.maxSize, logger)
+			require.NoError(t, err)
 			server := &Server{
-				orphanage: NewOrphanage(15*time.Minute, tt.maxSize, logger),
+				orphanage: orphanage,
 				logger:    logger,
 			}
 
@@ -1097,12 +1043,10 @@ func TestOrphanageStatsCalculation(t *testing.T) {
 			require.NoError(t, err)
 
 			// Add specified number of transactions
-			server.orphanageLock.Lock()
 			for i := 0; i < tt.itemsToAdd; i++ {
 				tx := createUniqueTx(baseTx, uint32(i))
 				server.orphanage.Set(*tx.TxIDChainHash(), tx)
 			}
-			server.orphanageLock.Unlock()
 
 			currentSize, maxSize, utilization := server.orphanage.Stats()
 			assert.Equal(t, tt.itemsToAdd, currentSize, "Current size should match items added")

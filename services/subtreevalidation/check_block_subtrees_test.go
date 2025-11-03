@@ -1444,7 +1444,8 @@ func setupTestServer(t *testing.T) (*Server, func()) {
 		Return(&currentState, nil).Maybe()
 
 	// Create orphanage to avoid nil pointer dereference
-	orphanage := NewOrphanage(time.Minute*10, 100, logger)
+	orphanage, err := NewOrphanage(time.Minute*10, 100, logger)
+	require.NoError(t, err)
 
 	server := &Server{
 		logger:           logger,

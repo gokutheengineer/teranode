@@ -119,9 +119,6 @@ type Server struct {
 	// orphanage manages orphaned transactions that are missing their parent transactions
 	orphanage *Orphanage
 
-	// orphanageLock is used to make sure we only process the orphanage once at a time
-	orphanageLock sync.Mutex
-
 	// pauseSubtreeProcessing is used to pause subtree processing while a block is being processed
 	pauseSubtreeProcessing atomic.Bool
 
@@ -194,10 +191,15 @@ func New(
 		subtreeConsumerClient:             subtreeConsumerClient,
 		txmetaConsumerClient:              txmetaConsumerClient,
 		invalidSubtreeDeDuplicateMap:      expiringmap.New[string, struct{}](time.Minute * 1),
-		orphanage:                         NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger),
 	}
 
 	var err error
+
+	// Initialize orphanage
+	u.orphanage, err = NewOrphanage(tSettings.SubtreeValidation.OrphanageTimeout, tSettings.SubtreeValidation.OrphanageMaxSize, logger)
+	if err != nil {
+		return nil, errors.NewConfigurationError("Failed to create orphanage: %v", err)
+	}
 
 	once.Do(func() {
 		quorumPath := tSettings.SubtreeValidation.QuorumPath
@@ -798,11 +800,9 @@ func (u *Server) checkSubtreeFromBlock(ctx context.Context, request *subtreevali
 
 	if subtree != nil {
 		// remove all transactions that are part of the subtree from the orphanage
-		u.orphanageLock.Lock()
 		for _, node := range subtree.Nodes {
 			u.orphanage.Delete(node.Hash)
 		}
-		u.orphanageLock.Unlock()
 	}
 
 	u.processOrphans(ctx, *blockHash, request.BlockHeight, blockIds)
@@ -813,9 +813,6 @@ func (u *Server) checkSubtreeFromBlock(ctx context.Context, request *subtreevali
 }
 
 func (u *Server) processOrphans(ctx context.Context, blockHash chainhash.Hash, blockHeight uint32, blockIds map[uint32]bool) {
-	u.orphanageLock.Lock()
-	defer u.orphanageLock.Unlock()
-
 	initialLength := u.orphanage.Len()
 
 	ctx, _, deferFn := tracing.Tracer("subtreevalidation").Start(ctx, "processOrphans",

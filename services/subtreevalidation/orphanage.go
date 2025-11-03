@@ -6,6 +6,7 @@ import (
 
 	"github.com/bsv-blockchain/go-bt/v2"
 	"github.com/bsv-blockchain/go-bt/v2/chainhash"
+	"github.com/bsv-blockchain/teranode/errors"
 	"github.com/bsv-blockchain/teranode/ulogger"
 	"github.com/ordishs/go-utils/expiringmap"
 )
@@ -13,8 +14,8 @@ import (
 // Orphanage manages orphaned transactions that are missing their parent transactions.
 // It provides a size-limited storage mechanism with TTL-based expiration.
 type Orphanage struct {
-	// map stores the orphaned transactions with TTL support
-	map_ *expiringmap.ExpiringMap[chainhash.Hash, *bt.Tx]
+	// txMap stores the orphaned transactions with TTL support
+	txMap *expiringmap.ExpiringMap[chainhash.Hash, *bt.Tx]
 
 	// maxSize is the maximum number of transactions that can be stored
 	maxSize int
@@ -27,30 +28,31 @@ type Orphanage struct {
 }
 
 // NewOrphanage creates a new Orphanage instance with the specified configuration.
-func NewOrphanage(timeout time.Duration, maxSize int, logger ulogger.Logger) *Orphanage {
+// Returns an error if the parameters are invalid.
+func NewOrphanage(timeout time.Duration, maxSize int, logger ulogger.Logger) (*Orphanage, error) {
 	if logger == nil {
-		panic("logger cannot be nil")
+		return nil, errors.NewConfigurationError("logger not found")
 	}
 	if maxSize <= 0 {
-		panic("maxSize must be positive")
+		return nil, errors.NewConfigurationError("maxSize must be positive")
 	}
 	if timeout <= 0 {
-		panic("timeout must be positive")
+		return nil, errors.NewConfigurationError("timeout must be positive")
 	}
 
 	orphanage := &Orphanage{
-		map_:    expiringmap.New[chainhash.Hash, *bt.Tx](timeout),
+		txMap:   expiringmap.New[chainhash.Hash, *bt.Tx](timeout),
 		maxSize: maxSize,
 		logger:  logger,
 	}
 
 	// Set up eviction function to log when transactions expire
-	orphanage.map_.WithEvictionFunction(func(hash chainhash.Hash, tx *bt.Tx) bool {
+	orphanage.txMap.WithEvictionFunction(func(hash chainhash.Hash, tx *bt.Tx) bool {
 		orphanage.logger.Debugf("[Orphanage] Transaction %s expired from orphanage", hash.String())
 		return false
 	})
 
-	return orphanage
+	return orphanage, nil
 }
 
 // Set adds a transaction to the orphanage if there's space.
@@ -65,16 +67,16 @@ func (o *Orphanage) Set(txHash chainhash.Hash, tx *bt.Tx) bool {
 	defer o.lock.Unlock()
 
 	// Check if orphanage is full - if so, reject the new entry
-	if o.map_.Len() >= o.maxSize {
+	if o.txMap.Len() >= o.maxSize {
 		o.logger.Warnf("[Orphanage] Rejecting transaction %s - orphanage is full (%d/%d)",
-			txHash.String(), o.map_.Len(), o.maxSize)
+			txHash.String(), o.txMap.Len(), o.maxSize)
 		return false
 	}
 
 	// Add the transaction
-	o.map_.Set(txHash, tx)
+	o.txMap.Set(txHash, tx)
 	o.logger.Debugf("[Orphanage] Added transaction %s (size: %d/%d)",
-		txHash.String(), o.map_.Len(), o.maxSize)
+		txHash.String(), o.txMap.Len(), o.maxSize)
 
 	return true
 }
@@ -83,7 +85,7 @@ func (o *Orphanage) Set(txHash chainhash.Hash, tx *bt.Tx) bool {
 func (o *Orphanage) Get(txHash chainhash.Hash) (*bt.Tx, bool) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
-	return o.map_.Get(txHash)
+	return o.txMap.Get(txHash)
 }
 
 // Delete removes a transaction from the orphanage.
@@ -91,16 +93,16 @@ func (o *Orphanage) Delete(txHash chainhash.Hash) {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
-	o.map_.Delete(txHash)
+	o.txMap.Delete(txHash)
 	o.logger.Debugf("[Orphanage] Removed transaction %s (size: %d/%d)",
-		txHash.String(), o.map_.Len(), o.maxSize)
+		txHash.String(), o.txMap.Len(), o.maxSize)
 }
 
 // Len returns the current number of entries in the orphanage.
 func (o *Orphanage) Len() int {
 	o.lock.Lock()
 	defer o.lock.Unlock()
-	return o.map_.Len()
+	return o.txMap.Len()
 }
 
 // Items returns all transactions in the orphanage.
@@ -108,7 +110,7 @@ func (o *Orphanage) Items() []*bt.Tx {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
-	items := o.map_.Items()
+	items := o.txMap.Items()
 	// Pre-allocate slice with exact capacity to avoid reallocations
 	result := make([]*bt.Tx, 0, len(items))
 
@@ -124,7 +126,7 @@ func (o *Orphanage) Cleanup() {
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
-	o.logger.Infof("[Orphanage] Cleanup: current size: %d/%d", o.map_.Len(), o.maxSize)
+	o.logger.Infof("[Orphanage] Cleanup: current size: %d/%d", o.txMap.Len(), o.maxSize)
 }
 
 // MaxSize returns the maximum size limit of the orphanage.
@@ -136,7 +138,7 @@ func (o *Orphanage) MaxSize() int {
 func (o *Orphanage) IsFull() bool {
 	o.lock.Lock()
 	defer o.lock.Unlock()
-	return o.map_.Len() >= o.maxSize
+	return o.txMap.Len() >= o.maxSize
 }
 
 // Stats returns statistics about the orphanage.
@@ -144,7 +146,7 @@ func (o *Orphanage) Stats() (currentSize, maxSize int, utilizationPercent float6
 	o.lock.Lock()
 	defer o.lock.Unlock()
 
-	currentSize = o.map_.Len()
+	currentSize = o.txMap.Len()
 	maxSize = o.maxSize
 	if maxSize > 0 {
 		utilizationPercent = float64(currentSize) / float64(maxSize) * 100.0
