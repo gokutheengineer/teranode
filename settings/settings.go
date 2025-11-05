@@ -310,6 +310,7 @@ func NewSettings(alternativeContext ...string) *Settings {
 			HTTPRateLimit:             getInt("validator_httpRateLimit", 1024, alternativeContext...),
 			KafkaMaxMessageBytes:      getInt("validator_kafka_maxMessageBytes", 1024*1024, alternativeContext...), // Default 1MB
 			UseLocalValidator:         getBool("useLocalValidator", false, alternativeContext...),
+			ValidationTimeout:         getDuration("validator_validationTimeout", 30*time.Second, alternativeContext...), // Default 30 seconds for transaction validation
 		},
 		Region: RegionSettings{
 			Name: getString("regionName", "defaultRegionName", alternativeContext...),

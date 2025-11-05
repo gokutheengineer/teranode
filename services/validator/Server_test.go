@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/bsv-blockchain/go-bt/v2/chainhash"
 	"github.com/bsv-blockchain/go-subtree"
 	"github.com/bsv-blockchain/teranode/services/blockchain"
+	"github.com/bsv-blockchain/teranode/services/validator/validator_api"
 	"github.com/bsv-blockchain/teranode/stores/utxo"
 	"github.com/bsv-blockchain/teranode/stores/utxo/meta"
 	"github.com/bsv-blockchain/teranode/ulogger"
@@ -464,4 +467,324 @@ func (m *TestMockValidator) GetMedianBlockTime() uint32 {
 
 func (m *TestMockValidator) TriggerBatcher() {
 	// No-op implementation for testing
+}
+
+// TestValidationTimeout tests that validation operations respect the configured timeout
+func TestValidationTimeout(t *testing.T) {
+	t.Run("gRPC ValidateTransaction respects timeout", func(t *testing.T) {
+		// Create test context
+		ctx := context.Background()
+
+		// Setup the validator server with short timeout
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 100 * time.Millisecond // Short timeout for testing
+		tSettings.BlockAssembly.Disabled = true
+
+		utxoStore := &utxo.MockUtxostore{}
+		blockchainClient := &blockchain.Mock{}
+
+		server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil)
+
+		// Create a mock validator that takes longer than the timeout
+		slowValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				// Simulate slow validation by checking if context is canceled
+				select {
+				case <-ctx.Done():
+					// Context was canceled due to timeout - this is expected
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+					// This should not happen as context should be canceled first
+					return &meta.Data{}, nil
+				}
+			},
+		}
+
+		server.validator = slowValidator
+
+		// Create a test transaction
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		// Create validation request
+		req := &validator_api.ValidateTransactionRequest{
+			TransactionData: testTx.Bytes(),
+			BlockHeight:     100,
+		}
+
+		// Execute validation - should timeout
+		start := time.Now()
+		_, err = server.ValidateTransaction(ctx, req)
+		duration := time.Since(start)
+
+		// Verify timeout occurred
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "context deadline exceeded")
+		require.Less(t, duration, 200*time.Millisecond, "Should timeout before mock completion")
+	})
+
+	t.Run("HTTP handleSingleTx respects timeout", func(t *testing.T) {
+		// Setup
+		ctx := context.Background()
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 100 * time.Millisecond
+		tSettings.BlockAssembly.Disabled = true
+
+		server := NewServer(logger, tSettings, &utxo.MockUtxostore{}, &blockchain.Mock{}, nil, nil, nil, nil)
+
+		// Create slow validator
+		slowValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+					return &meta.Data{}, nil
+				}
+			},
+		}
+		server.validator = slowValidator
+
+		// Setup Echo
+		e := echo.New()
+		e.HideBanner = true
+		e.POST("/tx", server.handleSingleTx(ctx))
+
+		// Create request
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/tx", bytes.NewReader(testTx.ExtendedBytes()))
+		rec := httptest.NewRecorder()
+
+		// Execute
+		start := time.Now()
+		c := e.NewContext(req, rec)
+		err = server.handleSingleTx(ctx)(c)
+		duration := time.Since(start)
+
+		// Verify timeout - either error is returned or status code indicates failure
+		if err != nil {
+			require.Contains(t, err.Error(), "context deadline exceeded")
+		} else {
+			require.NotEqual(t, http.StatusOK, rec.Code, "Expected non-OK status due to timeout")
+			require.Contains(t, rec.Body.String(), "context deadline exceeded")
+		}
+		require.Less(t, duration, 200*time.Millisecond)
+	})
+
+	t.Run("HTTP handleMultipleTx respects timeout per transaction", func(t *testing.T) {
+		ctx := context.Background()
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 100 * time.Millisecond
+		tSettings.BlockAssembly.Disabled = true
+
+		server := NewServer(logger, tSettings, &utxo.MockUtxostore{}, &blockchain.Mock{}, nil, nil, nil, nil)
+
+		// Create validator that times out on first tx
+		var callCount int32
+		slowValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				atomic.AddInt32(&callCount, 1)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+					return &meta.Data{}, nil
+				}
+			},
+		}
+		server.validator = slowValidator
+
+		// Setup Echo
+		e := echo.New()
+		e.HideBanner = true
+		e.POST("/txs", server.handleMultipleTx(ctx))
+
+		// Create request with multiple transactions
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		var buf bytes.Buffer
+		buf.Write(testTx.ExtendedBytes())
+		buf.Write(testTx.ExtendedBytes())
+
+		req := httptest.NewRequest(http.MethodPost, "/txs", &buf)
+		rec := httptest.NewRecorder()
+
+		// Execute
+		start := time.Now()
+		c := e.NewContext(req, rec)
+		err = server.handleMultipleTx(ctx)(c)
+		duration := time.Since(start)
+
+		// Verify timeout on first transaction (fail-fast behavior)
+		if err != nil {
+			require.Contains(t, err.Error(), "context deadline exceeded")
+		} else {
+			require.NotEqual(t, http.StatusOK, rec.Code, "Expected non-OK status due to timeout")
+			require.Contains(t, rec.Body.String(), "context deadline exceeded")
+		}
+		require.Less(t, duration, 200*time.Millisecond)
+		require.Equal(t, int32(1), atomic.LoadInt32(&callCount), "Should only process first tx before timeout")
+	})
+}
+
+// TestValidationTimeoutPropagation tests that timeout context propagates correctly
+func TestValidationTimeoutPropagation(t *testing.T) {
+	t.Run("timeout context propagates to ValidateWithOptions", func(t *testing.T) {
+		ctx := context.Background()
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 100 * time.Millisecond
+		tSettings.BlockAssembly.Disabled = true
+
+		server := NewServer(logger, tSettings, &utxo.MockUtxostore{}, &blockchain.Mock{}, nil, nil, nil, nil)
+
+		// Create validator that checks context deadline
+		var contextHadDeadline bool
+		var contextTimeout time.Duration
+		checkValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				deadline, ok := ctx.Deadline()
+				if ok {
+					contextHadDeadline = true
+					contextTimeout = time.Until(deadline)
+				}
+				return &meta.Data{}, nil
+			},
+		}
+		server.validator = checkValidator
+
+		// Create test transaction
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		// Execute validation
+		req := &validator_api.ValidateTransactionRequest{
+			TransactionData: testTx.Bytes(),
+			BlockHeight:     100,
+		}
+
+		_, _ = server.ValidateTransaction(ctx, req)
+
+		// Verify context had deadline
+		require.True(t, contextHadDeadline, "Context should have deadline set")
+		require.Greater(t, contextTimeout, time.Duration(0), "Timeout should be positive")
+		require.LessOrEqual(t, contextTimeout, tSettings.Validator.ValidationTimeout, "Timeout should not exceed configured value")
+	})
+
+	t.Run("multiple transactions get independent timeouts", func(t *testing.T) {
+		ctx := context.Background()
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 200 * time.Millisecond
+		tSettings.BlockAssembly.Disabled = true
+
+		server := NewServer(logger, tSettings, &utxo.MockUtxostore{}, &blockchain.Mock{}, nil, nil, nil, nil)
+
+		// Track validation times
+		var validationTimes []time.Time
+		var mu sync.Mutex
+		trackingValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				mu.Lock()
+				validationTimes = append(validationTimes, time.Now())
+				mu.Unlock()
+
+				// Each validation takes 50ms (well under timeout)
+				time.Sleep(50 * time.Millisecond)
+				return &meta.Data{}, nil
+			},
+		}
+		server.validator = trackingValidator
+
+		// Setup Echo
+		e := echo.New()
+		e.HideBanner = true
+		e.POST("/txs", server.handleMultipleTx(ctx))
+
+		// Create request with 3 transactions
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		var buf bytes.Buffer
+		buf.Write(testTx.ExtendedBytes())
+		buf.Write(testTx.ExtendedBytes())
+		buf.Write(testTx.ExtendedBytes())
+
+		req := httptest.NewRequest(http.MethodPost, "/txs", &buf)
+		rec := httptest.NewRecorder()
+
+		// Execute
+		c := e.NewContext(req, rec)
+		err = server.handleMultipleTx(ctx)(c)
+
+		// All should succeed because each gets independent timeout
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, 3, len(validationTimes), "All 3 transactions should be validated")
+	})
+}
+
+// TestValidationTimeoutErrorHandling tests error scenarios
+func TestValidationTimeoutErrorHandling(t *testing.T) {
+	t.Run("timeout preserves transaction order in batch", func(t *testing.T) {
+		ctx := context.Background()
+		logger := ulogger.TestLogger{}
+		tSettings := test.CreateBaseTestSettings(t)
+		tSettings.Validator.ValidationTimeout = 100 * time.Millisecond
+		tSettings.BlockAssembly.Disabled = true
+
+		server := NewServer(logger, tSettings, &utxo.MockUtxostore{}, &blockchain.Mock{}, nil, nil, nil, nil)
+
+		// First tx succeeds, second times out
+		var callCount int32
+		mixedValidator := &TestMockValidator{
+			validateTxFunc: func(ctx context.Context, tx *bt.Tx) (*meta.Data, error) {
+				count := atomic.AddInt32(&callCount, 1)
+				if count == 1 {
+					// First tx succeeds quickly
+					return &meta.Data{}, nil
+				}
+				// Second tx times out
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+					return &meta.Data{}, nil
+				}
+			},
+		}
+		server.validator = mixedValidator
+
+		e := echo.New()
+		e.HideBanner = true
+		e.POST("/txs", server.handleMultipleTx(ctx))
+
+		testTx, err := bt.NewTxFromBytes(sampleTx)
+		require.NoError(t, err)
+
+		var buf bytes.Buffer
+		buf.Write(testTx.ExtendedBytes())
+		buf.Write(testTx.ExtendedBytes())
+
+		req := httptest.NewRequest(http.MethodPost, "/txs", &buf)
+		rec := httptest.NewRecorder()
+
+		c := e.NewContext(req, rec)
+		err = server.handleMultipleTx(ctx)(c)
+
+		// Should fail on second transaction
+		if err != nil {
+			require.Contains(t, err.Error(), "context deadline exceeded")
+		} else {
+			require.NotEqual(t, http.StatusOK, rec.Code, "Expected non-OK status due to timeout")
+			require.Contains(t, rec.Body.String(), "context deadline exceeded")
+		}
+		require.Equal(t, int32(2), atomic.LoadInt32(&callCount), "Both transactions should be attempted")
+	})
 }

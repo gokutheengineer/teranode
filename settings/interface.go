@@ -322,6 +322,7 @@ type ValidatorSettings struct {
 	HTTPRateLimit             int
 	KafkaMaxMessageBytes      int // Maximum Kafka message size in bytes for transaction validation
 	UseLocalValidator         bool
+	ValidationTimeout         time.Duration // Maximum time allowed for transaction validation operations
 }
 
 type RegionSettings struct {

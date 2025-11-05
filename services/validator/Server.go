@@ -331,6 +331,10 @@ func (v *Server) Start(ctx context.Context, readyCh chan<- struct{}) error {
 	}
 
 	kafkaMessageHandler := func(msg *kafka.KafkaMessage) error {
+		// Apply validation timeout to prevent resource leaks from long-running operations
+		validationCtx, cancel := context.WithTimeout(ctx, v.settings.Validator.ValidationTimeout)
+		defer cancel()
+
 		var kafkaMsg kafkamessage.KafkaTxValidationTopicMessage
 		if err := proto.Unmarshal(msg.Value, &kafkaMsg); err != nil {
 			v.logger.Errorf("Failed to unmarshal kafka message: %v", err)
@@ -356,7 +360,7 @@ func (v *Server) Start(ctx context.Context, readyCh chan<- struct{}) error {
 		}
 
 		// should not pass in a height when validating from Kafka, should just be current utxo store height
-		if _, err = v.validator.ValidateWithOptions(ctx, tx, height, options); err != nil {
+		if _, err = v.validator.ValidateWithOptions(validationCtx, tx, height, options); err != nil {
 			prometheusInvalidTransactions.Inc()
 			v.logger.Errorf("[Validator] Invalid tx: %s", err)
 
@@ -428,7 +432,11 @@ func (v *Server) Stop(_ context.Context) error {
 //   - *validator_api.ValidateTransactionResponse: Validation results including success status
 //   - error: Any validation errors wrapped appropriately for gRPC transmission
 func (v *Server) ValidateTransaction(ctx context.Context, req *validator_api.ValidateTransactionRequest) (*validator_api.ValidateTransactionResponse, error) {
-	response, err := v.validateTransaction(ctx, req)
+	// Apply validation timeout to prevent resource leaks from long-running operations
+	vCtx, cancel := context.WithTimeout(ctx, v.settings.Validator.ValidationTimeout)
+	defer cancel()
+
+	response, err := v.validateTransaction(vCtx, req)
 	return response, errors.WrapGRPC(err)
 }
 
@@ -712,6 +720,10 @@ func extractValidationParams(c echo.Context) (uint32, *Options) {
 //   - 500 Internal Server Error: Validation failed with specific reason
 func (v *Server) handleSingleTx(ctx context.Context) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		// Apply validation timeout to prevent resource leaks from long-running operations
+		vCtx, cancel := context.WithTimeout(ctx, v.settings.Validator.ValidationTimeout)
+		defer cancel()
+
 		body, err := io.ReadAll(c.Request().Body)
 		if err != nil {
 			return c.String(http.StatusBadRequest, "[handleSingleTx] Invalid request body")
@@ -731,7 +743,7 @@ func (v *Server) handleSingleTx(ctx context.Context) echo.HandlerFunc {
 		}
 
 		// Process the transaction and return appropriate response
-		response, err := v.validateTransaction(ctx, req)
+		response, err := v.validateTransaction(vCtx, req)
 		if err != nil {
 			return c.String(http.StatusInternalServerError, "[handleSingleTx] Failed to process transaction: "+err.Error())
 		}
@@ -788,6 +800,10 @@ func (v *Server) handleMultipleTx(ctx context.Context) echo.HandlerFunc {
 				return c.String(http.StatusBadRequest, "[handleMultipleTx] Invalid request body: "+err.Error())
 			}
 
+			// Apply validation timeout to prevent resource leaks from long-running operations
+			// Each transaction gets its own timeout to avoid cumulative timeout issues
+			txCtx, cancel := context.WithTimeout(ctx, v.settings.Validator.ValidationTimeout)
+
 			// Process the transaction
 			req := &validator_api.ValidateTransactionRequest{
 				TransactionData:      tx.SerializeBytes(),
@@ -798,7 +814,9 @@ func (v *Server) handleMultipleTx(ctx context.Context) echo.HandlerFunc {
 				CreateConflicting:    &options.CreateConflicting,
 			}
 
-			response, err := v.validateTransaction(ctx, req)
+			response, err := v.validateTransaction(txCtx, req)
+			cancel() // Clean up resources immediately after validation
+
 			if err != nil {
 				return c.String(http.StatusInternalServerError, "[handleMultipleTx] Failed to process transaction: "+err.Error())
 			}
