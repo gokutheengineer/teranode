@@ -4397,6 +4397,52 @@
   
   
     <li class="md-nav__item">
+      <a href="../../../references/settings/global_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Global Settings
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../references/settings/policy_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Policy Settings
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../../references/settings/kafka_settings/" class="md-nav__link">
         
   
@@ -4435,10 +4481,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_6_4" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_6_6" >
         
           
-          <label class="md-nav__link" for="__nav_5_6_4" id="__nav_5_6_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_6_6" id="__nav_5_6_6_label" tabindex="0">
             
   
   
@@ -4451,8 +4497,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_6_4">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6_6">
             <span class="md-nav__icon md-icon"></span>
             Service Settings
           </label>
@@ -4787,10 +4833,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_6_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5_6_7" >
         
           
-          <label class="md-nav__link" for="__nav_5_6_5" id="__nav_5_6_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_5_6_7" id="__nav_5_6_7_label" tabindex="0">
             
   
   
@@ -4803,12 +4849,35 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5_6_5">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6_7">
             <span class="md-nav__icon md-icon"></span>
             Store Settings
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../references/settings/stores/aerospike_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Aerospike Store
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -5423,7 +5492,7 @@ When a block is found, its validation is expedited due to the continuous process
 <tr>
 <td><strong>SubTrees</strong></td>
 <td>Not used.</td>
-<td>A novel concept in Teranode, serving as an intermediary for holding transaction IDs and their Merkle roots.  </br></br> Each subtree contains 1 million transactions. Subtrees are broadcast every second. </br></br>Broadcast frequently for faster and continuous data propagation.</td>
+<td>A novel concept in Teranode, serving as an intermediary for holding transaction IDs and their Merkle roots.  <br/><br/> Each subtree contains 1 million transactions. Subtrees are broadcast every second. <br/><br/>Broadcast frequently for faster and continuous data propagation.</td>
 </tr>
 <tr>
 <td><strong>Blocks</strong></td>
@@ -5438,7 +5507,7 @@ When a block is found, its validation is expedited due to the continuous process
 <tr>
 <td><strong>Processed Transactions per second</strong></td>
 <td>3.3 to 7 transactions per second.</td>
-<td>Guaranteees a minimum of <strong>1 million transactions per second</strong> (100,000 x faster than BTC).</td>
+<td>Guarantees a minimum of <strong>1 million transactions per second</strong> (100,000 x faster than BTC).</td>
 </tr>
 <tr>
 <td><strong>Scalability Approach</strong></td>
@@ -5473,18 +5542,14 @@ When a block is found, its validation is expedited due to the continuous process
 <li>P2P Service</li>
 <li>P2P Bootstrap Service</li>
 <li>Legacy Service</li>
+<li>RPC Service</li>
 </ul>
 </li>
 <li>
 <p>Stores:</p>
 <ul>
-<li>
-<p>Stores:</p>
-<ul>
-<li>TX and Subtree Store]</li>
+<li>TX and Subtree Store</li>
 <li>UTXO Store</li>
-</ul>
-</li>
 </ul>
 </li>
 <li>
@@ -5532,7 +5597,7 @@ When a block is found, its validation is expedited due to the continuous process
 <td><strong>SubTrees</strong></td>
 <td>Not used.</td>
 <td>Not used. Traditional block propagation.</td>
-<td>A novel concept in Teranode, serving as an intermediary for holding transaction IDs and their Merkle roots. </br></br> Each subtree contains 1 million transactions. Subtrees are broadcast every second. </br></br>Broadcast frequently for faster and continuous data propagation.</td>
+<td>A novel concept in Teranode, serving as an intermediary for holding transaction IDs and their Merkle roots. <br/><br/> Each subtree contains 1 million transactions. Subtrees are broadcast every second. <br/><br/>Broadcast frequently for faster and continuous data propagation.</td>
 </tr>
 <tr>
 <td><strong>Blocks</strong></td>
@@ -5550,7 +5615,7 @@ When a block is found, its validation is expedited due to the continuous process
 <td><strong>Processed Transactions per second</strong></td>
 <td>3.3 to 7 transactions per second.</td>
 <td>Up to several thousand transactions per second.</td>
-<td>Guaranteees a minimum of <strong>1 million transactions per second</strong> (100,000 x faster than BTC).</td>
+<td>Guarantees a minimum of <strong>1 million transactions per second</strong> (100,000 x faster than BTC).</td>
 </tr>
 <tr>
 <td><strong>Mempool</strong></td>
@@ -5570,10 +5635,10 @@ When a block is found, its validation is expedited due to the continuous process
 <h2 id="5-node-workflow">5. Node Workflow</h2>
 <ol>
 <li><strong>Transaction Submission</strong>: Transactions are received by all nodes via a broadcast service.</li>
-<li><strong>Transaction Validation</strong>: The TX Validator Service checks each transaction against network rules.</li>
-<li><strong>Subtree Assembly</strong>: The Block Assembly Service organizes transactions into subtrees.</li>
-<li><strong>Subtree Validation</strong>: The Block Validation Service validates received subtrees.</li>
-<li><strong>Block Assembly</strong>: The Block Assembly Service compiles block templates consisting of subtrees.</li>
+<li><strong>Transaction Validation</strong>: The Validator Service checks each transaction against network rules.</li>
+<li><strong>Subtree Assembly</strong>: The Block Assembly Service organizes validated transactions into subtrees.</li>
+<li><strong>Subtree Validation</strong>: The Subtree Validation Service validates received subtrees.</li>
+<li><strong>Block Assembly</strong>: The Block Assembly Service compiles block templates consisting of validated subtrees.</li>
 <li><strong>Block Validation</strong>: When a valid block is found, it's sent to the Block Validation Service for final checks before being appended to the blockchain.</li>
 </ol>
 <p><img alt="ValidationSequenceDiagram.svg" src="../img/ValidationSequenceDiagram.svg" /></p>
