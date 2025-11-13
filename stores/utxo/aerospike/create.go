@@ -391,7 +391,7 @@ func (s *Store) sendStoreBatch(batch []*BatchStoreItem) {
 					wrapper.Bytes(),
 					setOptions...,
 				); err != nil && !errors.Is(err, errors.ErrBlobAlreadyExists) {
-					utils.SafeSend[error](bItem.done, errors.NewTxExistsError("error writing outputs to external store [%s]", bItem.txHash.String()))
+					utils.SafeSend[error](bItem.done, errors.NewStorageError("error writing outputs to external store [%s]", bItem.txHash.String()))
 					// NOOP for this record
 					batchRecords[idx] = aerospike.NewBatchRead(nil, placeholderKey, nil)
 
@@ -409,7 +409,7 @@ func (s *Store) sendStoreBatch(batch []*BatchStoreItem) {
 					fileformat.FileTypeTx,
 					bItem.tx.ExtendedBytes(),
 				); err != nil && !errors.Is(err, errors.ErrBlobAlreadyExists) {
-					utils.SafeSend[error](bItem.done, errors.NewTxExistsError("[sendStoreBatch] error batch writing transaction to external store [%s]", bItem.txHash.String()))
+					utils.SafeSend[error](bItem.done, errors.NewStorageError("[sendStoreBatch] error batch writing transaction to external store [%s]", bItem.txHash.String()))
 					// NOOP for this record
 					batchRecords[idx] = aerospike.NewBatchRead(nil, placeholderKey, nil)
 
@@ -826,7 +826,7 @@ func (s *Store) storeExternallyWithLock(
 	// Write to external blob storage (now protected by lock - no duplicate work)
 	timeStart := time.Now()
 	if err := s.externalStore.Set(ctx, bItem.txHash[:], fileType, blobData); err != nil && !errors.Is(err, errors.ErrBlobAlreadyExists) {
-		utils.SafeSend[error](bItem.done, errors.NewTxExistsError("[%s] error writing to external store [%s]", funcName, bItem.txHash.String()))
+		utils.SafeSend[error](bItem.done, errors.NewStorageError("[%s] error writing to external store [%s]", funcName, bItem.txHash.String()))
 		return
 	}
 
@@ -889,16 +889,14 @@ func (s *Store) storeExternallyWithLock(
 		return
 	}
 
-	if !bItem.locked {
-		clearErr := s.clearCreatingFlag(bItem.txHash, len(binsToStore))
-		if clearErr != nil {
-			// CRITICAL: Transaction records were created successfully but creating flag not cleared
-			// UTXOs cannot be spent while creating=true flag is set
-			// However, we return success because the transaction IS in the database
-			// Returning error would mislead the user into thinking creation failed
-			s.logger.Errorf("[%s] Transaction %s created but creating flag not cleared: %v", funcName, bItem.txHash, clearErr)
-			s.logger.Errorf("[%s] Records remain with creating=true, preventing UTXO spending. Will be cleared when setMined is called.", funcName)
-		}
+	clearErr := s.clearCreatingFlag(bItem.txHash, len(binsToStore))
+	if clearErr != nil {
+		// CRITICAL: Transaction records were created successfully but creating flag not cleared
+		// UTXOs cannot be spent while creating=true flag is set
+		// However, we return success because the transaction IS in the database
+		// Returning error would mislead the user into thinking creation failed
+		s.logger.Errorf("[%s] Transaction %s created but creating flag not cleared: %v", funcName, bItem.txHash, clearErr)
+		s.logger.Errorf("[%s] Records remain with creating=true, preventing UTXO spending. Will be cleared when setMined is called.", funcName)
 	}
 
 	utils.SafeSend(bItem.done, nil)
@@ -1011,7 +1009,7 @@ func (s *Store) clearCreatingFlag(txHash *chainhash.Hash, numRecords int) error 
 	readBatch := make([]aerospike.BatchRecordIfc, numRecords)
 	readPolicy := util.GetAerospikeBatchReadPolicy(s.settings)
 
-	for i := 0; i < numRecords; i++ {
+	for i := range numRecords {
 		keySource := uaerospike.CalculateKeySourceInternal(txHash, uint32(i))
 		key, err := aerospike.NewKey(s.namespace, s.setName, keySource)
 		if err != nil {
