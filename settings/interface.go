@@ -294,7 +294,7 @@ type BlockValidationSettings struct {
 	// Block fetching configuration
 	FetchLargeBatchSize     int // Large batches for maximum HTTP efficiency (default: 100, peer limit)
 	FetchNumWorkers         int // Number of worker goroutines for parallel processing (default: 16)
-	FetchBufferSize         int // Buffer size for channels (default: 500)
+	FetchBufferSize         int // Buffer size for channels (default: 50)
 	SubtreeFetchConcurrency int // Concurrent subtree fetches per block (default: 8)
 	// Transaction extension timeout
 	ExtendTransactionTimeout time.Duration // Timeout for extending transactions (default: 120s)
@@ -420,11 +420,6 @@ type P2PSettings struct {
 	PeerMapTTL             time.Duration // Time-to-live for peer map entries (default: 30m)
 	PeerMapCleanupInterval time.Duration // Cleanup interval (default: 5m)
 
-	// Peer health checker configuration
-	PeerHealthCheckInterval       time.Duration // Interval between health checks (default: 30s)
-	PeerHealthHTTPTimeout         time.Duration // HTTP timeout for DataHub checks (default: 5s)
-	PeerHealthRemoveAfterFailures int           // Consecutive failures before removing a peer (default: 3)
-
 	// DHT configuration
 	DHTMode            string        // DHT mode: "server" (default, advertises on DHT) or "client" (query-only, no provider storage)
 	DHTCleanupInterval time.Duration // Interval for DHT provider record cleanup (default: 24h, only applies to server mode)
@@ -433,6 +428,20 @@ type P2PSettings struct {
 	// Set to true in test environments where NAT traversal is not needed.
 	// Default: false (NAT features enabled)
 	DisableNAT bool
+
+	// EnableMDNS enables multicast DNS peer discovery on the local network.
+	// IMPORTANT: Only enable on isolated local networks. On shared hosting (e.g., Hetzner, AWS)
+	// without VLANs, mDNS broadcasts appear as network scanning and may result in abuse reports.
+	// Default: false (mDNS disabled for production safety)
+	// Set to true only for local development networks with proper isolation
+	EnableMDNS bool
+
+	// AllowPrivateIPs allows connections to private/local IP addresses during peer discovery.
+	// When true, allows connections to RFC1918 private networks (10.x, 172.16.x, 192.168.x).
+	// IMPORTANT: Only enable on private networks. On shared hosting, this may trigger network scanning alerts.
+	// Default: false (private IPs filtered for production safety)
+	// Set to true only for local development or private network deployments
+	AllowPrivateIPs bool
 
 	// Node mode configuration (full vs pruned)
 	AllowPrunedNodeFallback bool // If true, fall back to pruned nodes when no full nodes available (default: true). Selects youngest pruned node (smallest height) to minimize UTXO pruning risk.

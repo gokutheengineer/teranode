@@ -486,6 +486,9 @@ type ValidateSubtree struct {
 	// SubtreeHash is the unique identifier hash of the subtree to be validated
 	SubtreeHash chainhash.Hash
 
+	// PeerID is the ID of the peer from which we received the subtree
+	PeerID string
+
 	// BaseURL is the source URL for retrieving missing transactions if needed
 	BaseURL string
 
@@ -830,6 +833,13 @@ func (u *Server) ValidateSubtreeInternal(ctx context.Context, v ValidateSubtree,
 	// only set this on no errors
 	prometheusSubtreeValidationValidateSubtreeDuration.Observe(float64(time.Since(startTotal).Microseconds()) / 1_000_000)
 
+	// Increase peer's reputation for providing a valid subtree
+	if u.p2pClient != nil && v.PeerID != "" {
+		if err := u.p2pClient.ReportValidSubtree(ctx, v.PeerID, v.SubtreeHash.String()); err != nil {
+			u.logger.Warnf("[ValidateSubtreeInternal][%s] failed to report valid subtree to peer %s: %v", v.SubtreeHash.String(), v.PeerID, err)
+		}
+	}
+
 	return subtree, nil
 }
 
@@ -917,6 +927,15 @@ func (u *Server) getSubtreeTxHashes(spanCtx context.Context, stat *gocore.Stat, 
 	stat.NewStat("3. createTxHashes").AddTime(start)
 
 	u.logger.Debugf("[getSubtreeTxHashes][%s] done with subtree response", subtreeHash.String())
+
+	// TODO: Report successful subtree fetch to improve peer reputation
+	// Cannot call ReportValidSubtree here because we don't have peer ID, only baseURL (HTTP URL)
+	// Need to track peer ID through the call chain if we want to enable this
+	// if u.p2pClient != nil {
+	// 	if err := u.p2pClient.ReportValidSubtree(spanCtx, peerID, subtreeHash.String()); err != nil {
+	// 		u.logger.Warnf("[getSubtreeTxHashes][%s] failed to report valid subtree: %v", subtreeHash.String(), err)
+	// 	}
+	// }
 
 	return txHashes, nil
 }
@@ -1211,6 +1230,15 @@ func (u *Server) getSubtreeMissingTxs(ctx context.Context, subtreeHash chainhash
 								} else {
 									u.logger.Infof("[validateSubtree][%s] stored subtree data from %s", subtreeHash.String(), url)
 									subtreeDataExists = true
+
+									// TODO: Report successful subtree data fetch to improve peer reputation
+									// Cannot call ReportValidSubtree here because we don't have peer ID, only baseURL (HTTP URL)
+									// Need to track peer ID through the call chain if we want to enable this
+									// if u.p2pClient != nil {
+									// 	if err := u.p2pClient.ReportValidSubtree(ctx, peerID, subtreeHash.String()); err != nil {
+									// 		u.logger.Warnf("[validateSubtree][%s] failed to report valid subtree: %v", subtreeHash.String(), err)
+									// 	}
+									// }
 								}
 							}
 						}
@@ -1344,37 +1372,58 @@ func (u *Server) prepareTxsPerLevel(ctx context.Context, transactions []missingT
 		}
 	}
 
-	// Calculate levels using recursive approach with memoization
+	// Calculate levels using iterative topological sort to avoid stack overflow
+	// and detect circular dependencies
 	levelCache := make(map[chainhash.Hash]uint32)
 
-	var calculateLevel func(chainhash.Hash) uint32
-	calculateLevel = func(txHash chainhash.Hash) uint32 {
-		if level, exists := levelCache[txHash]; exists {
-			return level
-		}
-
-		// If no dependencies in subtree, level is 0
-		parents := dependencies[txHash]
+	// Find all transactions with no dependencies (level 0)
+	for txHash, parents := range dependencies {
 		if len(parents) == 0 {
 			levelCache[txHash] = 0
-			return 0
 		}
+	}
 
-		// Level is 1 + max(parent levels)
-		maxParentLevel := uint32(0)
-		for _, parentHash := range parents {
-			parentLevel := calculateLevel(parentHash)
-			if parentLevel > maxParentLevel {
-				maxParentLevel = parentLevel
+	// Process remaining transactions level by level
+	// Maximum iterations is len(dependencies) + 1 to handle all possible levels
+	maxIterations := len(dependencies) + 1
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		progress := false
+
+		for txHash, parents := range dependencies {
+			if _, exists := levelCache[txHash]; exists {
+				continue
+			}
+
+			// Check if all parents have computed levels
+			allParentsComputed := true
+			maxParentLevel := uint32(0)
+			for _, parentHash := range parents {
+				parentLevel, exists := levelCache[parentHash]
+				if !exists {
+					allParentsComputed = false
+					break
+				}
+				if parentLevel > maxParentLevel {
+					maxParentLevel = parentLevel
+				}
+			}
+
+			if allParentsComputed {
+				levelCache[txHash] = maxParentLevel + 1
+				progress = true
 			}
 		}
 
-		level := maxParentLevel + 1
-		levelCache[txHash] = level
-		return level
+		if !progress {
+			// No progress made - check if we're done or have a cycle
+			if len(levelCache) < len(dependencies) {
+				return 0, nil, errors.NewProcessingError("Circular dependency detected in transaction graph")
+			}
+			break
+		}
 	}
 
-	// Calculate levels for all transactions and update wrappers
+	// Update wrappers with calculated levels
 	for _, mTx := range transactions {
 		if mTx.tx == nil || mTx.tx.IsCoinbase() {
 			continue
@@ -1386,7 +1435,12 @@ func (u *Server) prepareTxsPerLevel(ctx context.Context, transactions []missingT
 			continue
 		}
 
-		level := calculateLevel(txHash)
+		level, exists := levelCache[txHash]
+		if !exists {
+			// This shouldn't happen if the algorithm is correct
+			return 0, nil, errors.NewProcessingError("Failed to calculate level for transaction")
+		}
+
 		wrapper.childLevelInBlock = level
 		wrapper.someParentsInBlock = len(dependencies[txHash]) > 0
 
