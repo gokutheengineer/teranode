@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../../../topics/architecture/img/bsvblockchain_blue_logo.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.618322db.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -6478,19 +6478,41 @@
 <td><strong>CRITICAL</strong> - Database connection (fails during daemon startup if null)</td>
 </tr>
 <tr>
+<td>FSMStateRestore</td>
+<td>bool</td>
+<td>false</td>
+<td>fsm_state_restore</td>
+<td>Triggers FSM restore mode via RPC service</td>
+</tr>
+<tr>
 <td>FSMStateChangeDelay</td>
 <td>time.Duration</td>
 <td>0</td>
 <td>fsm_state_change_delay</td>
 <td><strong>TESTING ONLY</strong> - Delays FSM state transitions</td>
 </tr>
+<tr>
+<td>StoreDBTimeoutMillis</td>
+<td>int</td>
+<td>5000</td>
+<td>blockchain_store_dbTimeoutMillis</td>
+<td>Database operation timeout (store-level)</td>
+</tr>
+<tr>
+<td>InitializeNodeInState</td>
+<td>string</td>
+<td>""</td>
+<td>blockchain_initializeNodeInState</td>
+<td><strong>UNUSED</strong> - Defined but not referenced in code</td>
+</tr>
 </tbody>
 </table>
 <h2 id="configuration-dependencies">Configuration Dependencies</h2>
 <h3 id="grpc-server">gRPC Server</h3>
 <ul>
-<li><code>GRPCListenAddress</code> optional - service runs without it</li>
+<li><code>GRPCListenAddress</code> optional - when empty, gRPC server not started</li>
 <li>Health checks skipped if empty</li>
+<li>Service runs with HTTP API only when empty</li>
 <li><code>GRPCAddress</code> used for client connections</li>
 </ul>
 <h3 id="http-api-server">HTTP API Server</h3>
@@ -6500,14 +6522,15 @@
 </ul>
 <h3 id="fsm-state-management">FSM State Management</h3>
 <ul>
+<li><code>FSMStateRestore = true</code>: RPC service sends Restore event to Blockchain FSM during initialization</li>
 <li><code>FSMStateChangeDelay</code> delays state transitions for test timing control</li>
 <li>Initial FSM state set via <code>-localTestStartFromState</code> CLI argument</li>
-<li>FSM restore mode triggered by RPC service (see RPC settings)</li>
 </ul>
 <h3 id="database-configuration">Database Configuration</h3>
 <ul>
 <li><code>StoreURL</code> determines database backend</li>
 <li>Service fails during daemon startup if null</li>
+<li><code>StoreDBTimeoutMillis</code> passed to blockchain store for database timeout configuration</li>
 </ul>
 <h2 id="service-dependencies">Service Dependencies</h2>
 <table>
@@ -6640,10 +6663,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="../../../../assets/external/unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
       

@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../../../topics/architecture/img/bsvblockchain_blue_logo.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.618322db.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -6434,25 +6434,28 @@
 <td>string</td>
 <td>"bitcoin_alert_system"</td>
 <td>alert_topic_name</td>
-<td>P2P pubsub topic (auto-prefixed for testnet/regtest)</td>
+<td>P2P pubsub topic (auto-suffixed for testnet/regtest)</td>
 </tr>
 <tr>
 <td>P2PPort</td>
 <td>int</td>
 <td>9908</td>
 <td>ALERT_P2P_PORT</td>
-<td>P2P listening port (must be &gt;= 10)</td>
+<td>P2P listening port (string length &gt;= 2 after PORT_PREFIX applied)</td>
 </tr>
 </tbody>
 </table>
 <h2 id="network-specific-behavior">Network-Specific Behavior</h2>
-<p><strong>Topic Name Prefixing:</strong></p>
+<p><strong>Topic Name Suffixing:</strong></p>
 <ul>
 <li>Mainnet: Uses configured <code>TopicName</code> as-is</li>
-<li>Testnet: Auto-prefixed as <code>{TopicName}_testnet</code></li>
-<li>Regtest: Auto-prefixed as <code>{TopicName}_regtest</code></li>
+<li>Testnet: Auto-suffixed as <code>{TopicName}_testnet</code></li>
+<li>Regtest: Auto-suffixed as <code>{TopicName}_regtest</code></li>
 </ul>
 <p>This behavior cannot be overridden.</p>
+<p><strong>PORT_PREFIX Support:</strong></p>
+<p>The global <code>PORT_PREFIX</code> environment variable is prepended to <code>P2PPort</code> if set.</p>
+<p>Example: <code>PORT_PREFIX=1</code> with <code>ALERT_P2P_PORT=9908</code> results in port 19908.</p>
 <h2 id="auto-generation-behavior">Auto-Generation Behavior</h2>
 <p><strong>P2P Private Key:</strong></p>
 <ul>
@@ -6607,7 +6610,7 @@
 </tr>
 <tr>
 <td>P2P.Port</td>
-<td>Length &gt;= 2 characters (&gt;= 10)</td>
+<td>String length &gt;= 2 characters</td>
 <td><code>config.ErrNoP2PPort</code></td>
 <td>During <code>Init()</code></td>
 </tr>
@@ -6700,10 +6703,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="../../../../assets/external/unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
       

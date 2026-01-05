@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../../../topics/architecture/img/bsvblockchain_blue_logo.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.618322db.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -5434,6 +5434,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#state-file-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State File Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#concurrency-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6306,6 +6317,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#state-file-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        State File Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#concurrency-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6467,9 +6489,9 @@
 <tr>
 <td>StateFile</td>
 <td>string</td>
-<td>"file://./data/blockpersister_state.txt"</td>
+<td>""</td>
 <td>blockPersister_stateFile</td>
-<td><strong>CRITICAL</strong> - Tracks last persisted block for recovery</td>
+<td><strong>CRITICAL</strong> - Tracks last persisted block for recovery (auto-derived for file:// stores)</td>
 </tr>
 <tr>
 <td>PersisterHTTPListenAddress</td>
@@ -6504,7 +6526,14 @@
 <td>bool</td>
 <td>false</td>
 <td>blockpersister_skipUTXODelete</td>
-<td>UTXO deletion behavior</td>
+<td><strong>UNUSED</strong> - Not referenced in BlockPersister service</td>
+</tr>
+<tr>
+<td>BlockPersisterProcessUTXOFiles</td>
+<td>bool</td>
+<td>true</td>
+<td>blockpersister_processUTXOFiles</td>
+<td><strong>POTENTIALLY UNUSED</strong> - May control UTXO file processing</td>
 </tr>
 <tr>
 <td>BlockPersisterPersistAge</td>
@@ -6530,7 +6559,7 @@
 <tr>
 <td>BlockStore</td>
 <td>*url.URL</td>
-<td>""</td>
+<td>"file://./data/blockstore"</td>
 <td>blockstore</td>
 <td>Required when HTTP server enabled</td>
 </tr>
@@ -6541,6 +6570,12 @@
 <ul>
 <li>When <code>PersisterHTTPListenAddress</code> is not empty, HTTP server starts</li>
 <li>Requires valid <code>BlockStore</code> URL or returns configuration error</li>
+</ul>
+<h3 id="state-file-management">State File Management</h3>
+<ul>
+<li>For file:// stores, <code>StateFile</code> auto-derived from <code>PersisterStore</code> path if not explicitly set</li>
+<li>For non-file stores (S3, etc.), explicit <code>StateFile</code> required or configuration error occurs</li>
+<li>Auto-derived path: <code>{PersisterStore_path}/blockpersister_state.txt</code></li>
 </ul>
 <h3 id="concurrency-management">Concurrency Management</h3>
 <ul>
@@ -6703,10 +6738,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="../../../../assets/external/unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
       

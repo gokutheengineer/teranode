@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../../../topics/architecture/img/bsvblockchain_blue_logo.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.618322db.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -5652,6 +5652,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#algorithm-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Algorithm Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#grpc-server-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6317,6 +6328,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#algorithm-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Algorithm Optimization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#grpc-server-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -6603,6 +6625,20 @@
 <td>subtreevalidation_pauseTimeout</td>
 <td><strong>CRITICAL</strong> - Maximum pause duration</td>
 </tr>
+<tr>
+<td>TxBatchSize</td>
+<td>int</td>
+<td>1048576</td>
+<td>subtreevalidation_check_block_subtrees_tx_batch_size</td>
+<td>Transaction batch size for CheckBlockSubtrees (0 = no batching)</td>
+</tr>
+<tr>
+<td>UseOrderedLevelAlgorithm</td>
+<td>bool</td>
+<td>true</td>
+<td>subtreevalidation_useOrderedLevelAlgorithm</td>
+<td><strong>CRITICAL</strong> - Optimized O(V*I) algorithm for ordered transactions</td>
+</tr>
 </tbody>
 </table>
 <h2 id="configuration-dependencies">Configuration Dependencies</h2>
@@ -6621,6 +6657,12 @@
 <li><code>CheckBlockSubtreesConcurrency</code> controls block subtree checking operations</li>
 <li><code>SpendBatcherSize</code> controls spend operation batch processing and concurrency limits</li>
 <li><code>GetMissingTransactions</code> controls missing transaction retrieval concurrency</li>
+<li><code>TxBatchSize</code> controls transaction batching for CheckBlockSubtrees (0 disables batching)</li>
+</ul>
+<h3 id="algorithm-optimization">Algorithm Optimization</h3>
+<ul>
+<li><code>UseOrderedLevelAlgorithm</code> enables optimized O(V*I) algorithm assuming transactions are ordered</li>
+<li>When true, improves performance for ordered transaction processing</li>
 </ul>
 <h3 id="grpc-server-management">gRPC Server Management</h3>
 <ul>
@@ -6665,6 +6707,7 @@
 <th>Setting</th>
 <th>Validation</th>
 <th>Impact</th>
+<th>When Checked</th>
 </tr>
 </thead>
 <tbody>
@@ -6672,21 +6715,31 @@
 <td>GRPCListenAddress</td>
 <td>Health checks only if not empty</td>
 <td>Service monitoring</td>
+<td>During service initialization</td>
 </tr>
 <tr>
 <td>SubtreeStore</td>
 <td>Must be valid URL format</td>
 <td>Storage access</td>
+<td>During service initialization</td>
 </tr>
 <tr>
 <td>TxMetaCacheEnabled</td>
 <td>Controls cache usage</td>
 <td>Performance</td>
+<td>During transaction processing</td>
 </tr>
 <tr>
 <td>PauseTimeout</td>
 <td>Controls maximum pause duration</td>
 <td>Processing control</td>
+<td>During block validation</td>
+</tr>
+<tr>
+<td>UseOrderedLevelAlgorithm</td>
+<td>Controls algorithm selection</td>
+<td>Performance optimization</td>
+<td>During subtree validation</td>
 </tr>
 </tbody>
 </table>
@@ -6770,10 +6823,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="../../../../assets/external/unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
       

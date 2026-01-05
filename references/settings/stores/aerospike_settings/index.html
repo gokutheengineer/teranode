@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../../../topics/architecture/img/bsvblockchain_blue_logo.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../../../../assets/stylesheets/main.618322db.min.css">
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.484c7ddc.min.css">
       
       
 
@@ -7048,6 +7048,7 @@
 <th>Setting</th>
 <th>Validation</th>
 <th>Impact</th>
+<th>When Checked</th>
 </tr>
 </thead>
 <tbody>
@@ -7055,36 +7056,43 @@
 <td>Host</td>
 <td>Must be valid hostname/IP</td>
 <td>Connection failure if invalid</td>
+<td>During store initialization</td>
 </tr>
 <tr>
 <td>Port</td>
 <td>Must be valid port number (1-65535)</td>
 <td>Connection failure if invalid</td>
+<td>During store initialization</td>
 </tr>
 <tr>
 <td>BatchPolicyURL</td>
 <td>Must be valid URL with aerospike:// scheme</td>
 <td>Policy parsing failure</td>
+<td>During policy configuration</td>
 </tr>
 <tr>
 <td>ReadPolicyURL</td>
 <td>Must be valid URL with aerospike:// scheme</td>
 <td>Policy parsing failure</td>
+<td>During policy configuration</td>
 </tr>
 <tr>
 <td>WritePolicyURL</td>
 <td>Must be valid URL with aerospike:// scheme</td>
 <td>Policy parsing failure</td>
+<td>During policy configuration</td>
 </tr>
 <tr>
 <td>QueryPolicyURL</td>
 <td>Must be valid URL with aerospike:// scheme</td>
 <td>Policy parsing failure</td>
+<td>During policy configuration</td>
 </tr>
 <tr>
 <td>StatsRefreshDuration</td>
 <td>Must be positive duration</td>
 <td>Statistics update frequency</td>
+<td>During store initialization</td>
 </tr>
 </tbody>
 </table>
@@ -7240,10 +7248,10 @@ aerospike_queryPolicy = aerospike:///?MaxRetries=3&amp;TotalTimeout=2s&amp;Socke
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.7a47a382.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.instant", "search.suggest", "search.highlight"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../../../assets/javascripts/bundle.e71a0d61.min.js"></script>
+      <script src="../../../../assets/javascripts/bundle.79ae519e.min.js"></script>
       
         <script src="../../../../assets/external/unpkg.com/mermaid@11/dist/mermaid.min.js"></script>
       
