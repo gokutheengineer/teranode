@@ -149,6 +149,13 @@ func NewSettings(alternativeContext ...string) *Settings {
 			// Debug logging
 			EnableDebugLogging: getBool("kafka_enable_debug_logging", false, alternativeContext...),
 			Scheme:             getString("KAFKA_SCHEMA", "http", alternativeContext...),
+			// Adaptive batching
+			AdaptiveBatchEnabled:               getBool("KAFKA_ADAPTIVE_BATCH_ENABLED", false, alternativeContext...),
+			AdaptiveBatchConstraintThreshold:   getFloat64("KAFKA_ADAPTIVE_BATCH_CONSTRAINT_THRESHOLD", 3.0, alternativeContext...),
+			AdaptiveBatchRecoveryThreshold:     getFloat64("KAFKA_ADAPTIVE_BATCH_RECOVERY_THRESHOLD", 1.5, alternativeContext...),
+			AdaptiveBatchMaxLingerMs:           getInt("KAFKA_ADAPTIVE_BATCH_MAX_LINGER_MS", 500, alternativeContext...),
+			AdaptiveBatchMaxBatchTarget:        getInt("KAFKA_ADAPTIVE_BATCH_MAX_BATCH_TARGET", 100, alternativeContext...),
+			AdaptiveBatchBackpressureThreshold: getInt("KAFKA_ADAPTIVE_BATCH_BACKPRESSURE_THRESHOLD", 10000, alternativeContext...),
 		},
 		Aerospike: AerospikeSettings{
 			Debug:                           getBool("aerospike_debug", false, alternativeContext...),

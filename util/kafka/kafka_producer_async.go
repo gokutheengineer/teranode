@@ -65,6 +65,9 @@ type KafkaProducerConfig struct {
 
 	// Debug logging
 	EnableDebugLogging bool // Enable verbose debug logging
+
+	// Adaptive batching: dynamically adjusts linger and batch size under bandwidth constraints
+	AdaptiveBatch AdaptiveBatchConfig
 }
 
 // MessageStatus represents the status of a produced message.
@@ -84,7 +87,7 @@ type Message struct {
 type KafkaAsyncProducer struct {
 	Config         KafkaProducerConfig // Producer configuration
 	client         *kgo.Client         // Underlying franz-go client
-	publishChannel chan *Message       // Channel for publishing messages
+	publishChannel chan *Message        // Channel for publishing messages
 	closed         atomic.Bool         // Flag indicating if producer is closed
 	channelMu      sync.RWMutex        // Mutex to protect publishChannel access
 	publishWg      sync.WaitGroup      // WaitGroup to track publish goroutine
@@ -92,6 +95,9 @@ type KafkaAsyncProducer struct {
 	// For in-memory support
 	inMemoryProducer *inmemorykafka.InMemoryAsyncProducer
 	isInMemory       bool
+
+	// Adaptive batching controller (nil when disabled)
+	adaptiveBatcher *AdaptiveBatchController
 }
 
 // NewKafkaAsyncProducerFromURL creates a new async producer from a URL configuration.
@@ -108,6 +114,7 @@ func NewKafkaAsyncProducerFromURL(ctx context.Context, logger ulogger.Logger, ur
 
 	var enableTLS, tlsSkipVerify, enableDebugLogging bool
 	var tlsCAFile, tlsCertFile, tlsKeyFile string
+	adaptiveBatchCfg := DefaultAdaptiveBatchConfig()
 	if kafkaSettings != nil {
 		enableTLS = kafkaSettings.EnableTLS
 		tlsSkipVerify = kafkaSettings.TLSSkipVerify
@@ -115,6 +122,7 @@ func NewKafkaAsyncProducerFromURL(ctx context.Context, logger ulogger.Logger, ur
 		tlsCertFile = kafkaSettings.TLSCertFile
 		tlsKeyFile = kafkaSettings.TLSKeyFile
 		enableDebugLogging = kafkaSettings.EnableDebugLogging
+		adaptiveBatchCfg = adaptiveBatchConfigFromSettings(kafkaSettings)
 	}
 
 	producerConfig := KafkaProducerConfig{
@@ -135,6 +143,7 @@ func NewKafkaAsyncProducerFromURL(ctx context.Context, logger ulogger.Logger, ur
 		TLSCertFile:           tlsCertFile,
 		TLSKeyFile:            tlsKeyFile,
 		EnableDebugLogging:    enableDebugLogging,
+		AdaptiveBatch:         adaptiveBatchCfg,
 	}
 
 	producer, err := retry.Retry(ctx, logger, func() (*KafkaAsyncProducer, error) {
@@ -163,6 +172,7 @@ func NewKafkaAsyncProducer(logger ulogger.Logger, cfg KafkaProducerConfig) (*Kaf
 			Config:           cfg,
 			inMemoryProducer: producer,
 			isInMemory:       true,
+			adaptiveBatcher:  NewAdaptiveBatchController(cfg.AdaptiveBatch, logger),
 		}
 
 		return client, nil
@@ -205,8 +215,9 @@ func NewKafkaAsyncProducer(logger ulogger.Logger, cfg KafkaProducerConfig) (*Kaf
 	}
 
 	producer := &KafkaAsyncProducer{
-		Config: cfg,
-		client: client,
+		Config:          cfg,
+		client:          client,
+		adaptiveBatcher: NewAdaptiveBatchController(cfg.AdaptiveBatch, logger),
 	}
 
 	return producer, nil
@@ -244,29 +255,10 @@ func (c *KafkaAsyncProducer) Start(ctx context.Context, ch chan *Message) {
 			ch := c.publishChannel
 			c.channelMu.RUnlock()
 
-			for msgBytes := range ch {
-				if c.closed.Load() {
-					break
-				}
-
-				record := &kgo.Record{
-					Topic: c.Config.Topic,
-					Key:   msgBytes.Key,
-					Value: msgBytes.Value,
-				}
-
-				if c.closed.Load() {
-					break
-				}
-
-				// Produce asynchronously with callback
-				c.client.Produce(internalCtx, record, func(r *kgo.Record, err error) {
-					if err != nil {
-						c.Config.Logger.Errorf("Failed to deliver message to topic %s: %v, Key: %x", r.Topic, err, r.Key)
-					} else {
-						c.Config.Logger.Debugf("Successfully sent message to topic %s, partition: %d, offset: %d", r.Topic, r.Partition, r.Offset)
-					}
-				})
+			if c.adaptiveBatcher != nil {
+				c.produceWithAdaptiveBatching(internalCtx, ch)
+			} else {
+				c.produceStandard(internalCtx, ch)
 			}
 		}()
 
@@ -290,6 +282,114 @@ func (c *KafkaAsyncProducer) Start(ctx context.Context, ch chan *Message) {
 	}()
 
 	wg.Wait()
+}
+
+// produceStandard is the original produce loop that sends messages one at a time.
+func (c *KafkaAsyncProducer) produceStandard(ctx context.Context, ch <-chan *Message) {
+	for msgBytes := range ch {
+		if c.closed.Load() {
+			break
+		}
+
+		record := &kgo.Record{
+			Topic: c.Config.Topic,
+			Key:   msgBytes.Key,
+			Value: msgBytes.Value,
+		}
+
+		if c.closed.Load() {
+			break
+		}
+
+		c.client.Produce(ctx, record, func(r *kgo.Record, err error) {
+			if err != nil {
+				c.Config.Logger.Errorf("Failed to deliver message to topic %s: %v, Key: %x", r.Topic, err, r.Key)
+			} else {
+				c.Config.Logger.Debugf("Successfully sent message to topic %s, partition: %d, offset: %d", r.Topic, r.Partition, r.Offset)
+			}
+		})
+	}
+}
+
+// produceWithAdaptiveBatching collects messages into batches whose size and
+// accumulation delay are driven by the adaptive batch controller. Under normal
+// conditions it behaves like produceStandard; under bandwidth constraints it
+// increases linger and batch size to amortize network overhead.
+func (c *KafkaAsyncProducer) produceWithAdaptiveBatching(ctx context.Context, ch <-chan *Message) {
+	batcher := c.adaptiveBatcher
+
+	for {
+		if c.closed.Load() {
+			break
+		}
+
+		batch := c.collectBatch(ch, batcher.GetBatchTarget(), batcher.GetLingerDelay())
+		if len(batch) == 0 {
+			break
+		}
+
+		for _, msgBytes := range batch {
+			if c.closed.Load() {
+				return
+			}
+
+			// Backpressure: wait until buffer pressure subsides
+			for batcher.IsBackpressured() && !c.closed.Load() {
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			batcher.IncrementPending()
+
+			record := &kgo.Record{
+				Topic: c.Config.Topic,
+				Key:   msgBytes.Key,
+				Value: msgBytes.Value,
+			}
+
+			sendStart := time.Now()
+			c.client.Produce(ctx, record, func(r *kgo.Record, err error) {
+				batcher.DecrementPending()
+				batcher.RecordSendDuration(time.Since(sendStart))
+
+				if err != nil {
+					c.Config.Logger.Errorf("Failed to deliver message to topic %s: %v, Key: %x", r.Topic, err, r.Key)
+				} else {
+					c.Config.Logger.Debugf("Successfully sent message to topic %s, partition: %d, offset: %d", r.Topic, r.Partition, r.Offset)
+				}
+			})
+		}
+	}
+}
+
+// collectBatch reads up to batchTarget messages from the channel, optionally
+// waiting lingerDelay after the first message to let more accumulate.
+// Returns nil when the channel is closed or the producer is shutting down.
+func (c *KafkaAsyncProducer) collectBatch(ch <-chan *Message, batchTarget int, lingerDelay time.Duration) []*Message {
+	first, ok := <-ch
+	if !ok || c.closed.Load() {
+		return nil
+	}
+
+	batch := make([]*Message, 0, batchTarget)
+	batch = append(batch, first)
+
+	if lingerDelay > 0 {
+		time.Sleep(lingerDelay)
+	}
+
+	for len(batch) < batchTarget {
+		select {
+		case msg, ok := <-ch:
+			if !ok || c.closed.Load() {
+				return batch
+			}
+			batch = append(batch, msg)
+		default:
+			return batch
+		}
+	}
+
+	return batch
 }
 
 // startInMemory handles the in-memory producer case
@@ -528,6 +628,29 @@ func (f *franzLoggerAdapter) Log(level kgo.LogLevel, msg string, keyvals ...inte
 	default:
 		f.logger.Infof("%s", formatted)
 	}
+}
+
+// adaptiveBatchConfigFromSettings builds an AdaptiveBatchConfig from KafkaSettings,
+// using DefaultAdaptiveBatchConfig for any fields not exposed in settings.
+func adaptiveBatchConfigFromSettings(ks *settings.KafkaSettings) AdaptiveBatchConfig {
+	cfg := DefaultAdaptiveBatchConfig()
+	cfg.Enabled = ks.AdaptiveBatchEnabled
+	if ks.AdaptiveBatchConstraintThreshold > 0 {
+		cfg.ConstraintThreshold = ks.AdaptiveBatchConstraintThreshold
+	}
+	if ks.AdaptiveBatchRecoveryThreshold > 0 {
+		cfg.RecoveryThreshold = ks.AdaptiveBatchRecoveryThreshold
+	}
+	if ks.AdaptiveBatchMaxLingerMs > 0 {
+		cfg.MaxLingerDelay = time.Duration(ks.AdaptiveBatchMaxLingerMs) * time.Millisecond
+	}
+	if ks.AdaptiveBatchMaxBatchTarget > 0 {
+		cfg.MaxBatchTarget = ks.AdaptiveBatchMaxBatchTarget
+	}
+	if ks.AdaptiveBatchBackpressureThreshold > 0 {
+		cfg.BackpressureThreshold = int64(ks.AdaptiveBatchBackpressureThreshold)
+	}
+	return cfg
 }
 
 // stringPtr returns a pointer to the string

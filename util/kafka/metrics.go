@@ -33,6 +33,21 @@ var (
 	// This histogram measures the duration between when Consume() was called and
 	// when the watchdog detected it as stuck, helping diagnose consumer hangs.
 	prometheusKafkaWatchdogStuckDuration *prometheus.HistogramVec
+
+	// prometheusKafkaProducerSendDuration tracks end-to-end produce latency (from
+	// Produce() call to broker acknowledgment).
+	// Labels: topic
+	prometheusKafkaProducerSendDuration *prometheus.HistogramVec
+
+	// prometheusKafkaProducerAdaptiveState reports whether the adaptive batch
+	// controller is in constrained mode (1) or normal mode (0).
+	// Labels: topic
+	prometheusKafkaProducerAdaptiveState *prometheus.GaugeVec
+
+	// prometheusKafkaProducerBackpressureTotal counts the number of times
+	// backpressure was activated due to excessive pending produces.
+	// Labels: topic
+	prometheusKafkaProducerBackpressureTotal *prometheus.CounterVec
 )
 
 var (
@@ -63,6 +78,37 @@ func _initPrometheusMetrics() {
 			Name:      "watchdog_stuck_duration_seconds",
 			Help:      "Duration (in seconds) that consumer was stuck before watchdog recovery",
 			Buckets:   util.MetricsBucketsSeconds,
+		},
+		[]string{"topic"},
+	)
+
+	prometheusKafkaProducerSendDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "teranode",
+			Subsystem: "kafka",
+			Name:      "producer_send_duration_seconds",
+			Help:      "End-to-end produce latency from Produce() call to broker acknowledgment",
+			Buckets:   util.MetricsBucketsSeconds,
+		},
+		[]string{"topic"},
+	)
+
+	prometheusKafkaProducerAdaptiveState = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "teranode",
+			Subsystem: "kafka",
+			Name:      "producer_adaptive_batch_constrained",
+			Help:      "Whether the adaptive batch controller detects bandwidth constraint (1=constrained, 0=normal)",
+		},
+		[]string{"topic"},
+	)
+
+	prometheusKafkaProducerBackpressureTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "teranode",
+			Subsystem: "kafka",
+			Name:      "producer_backpressure_activations_total",
+			Help:      "Number of times backpressure was activated due to excessive pending produces",
 		},
 		[]string{"topic"},
 	)
