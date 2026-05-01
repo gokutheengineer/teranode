@@ -40,7 +40,7 @@ func TestHTTPServer_Endpoints(t *testing.T) {
 	blockchainClient := &blockchain.Mock{}
 
 	// Create server instance
-	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil)
+	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil, nil)
 
 	// Create a mock validator to replace the real one
 	txid, _ := chainhash.NewHashFromStr("63f7f771376f9f9369e650d7a72d1f0328c2e5582eb3381b913a4a36dc78ec6e")
@@ -183,7 +183,7 @@ func TestValidatorHTTP_Endpoints(t *testing.T) {
 	blockchainClient := &blockchain.Mock{}
 
 	// Create server instance
-	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil)
+	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil, nil)
 
 	// Create a mock validator to replace the real one
 	txid, _ := chainhash.NewHashFromStr("63f7f771376f9f9369e650d7a72d1f0328c2e5582eb3381b913a4a36dc78ec6e")
@@ -292,7 +292,7 @@ func TestHTTPServerIntegration(t *testing.T) {
 	blockchainClient := &blockchain.Mock{}
 
 	// Create server instance
-	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil)
+	server := NewServer(logger, tSettings, utxoStore, blockchainClient, nil, nil, nil, nil, nil)
 
 	// Create a mock validator to replace the real one
 	txid, _ := chainhash.NewHashFromStr("63f7f771376f9f9369e650d7a72d1f0328c2e5582eb3381b913a4a36dc78ec6e")

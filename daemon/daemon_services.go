@@ -786,6 +786,17 @@ func (d *Daemon) startValidationService(
 			return err
 		}
 
+		var policyRejectedTxConsumerClient *kafka.KafkaConsumerGroup
+
+		policyRejectedTxConsumerClient, err = getKafkaTxPolicyRejectedConsumerGroup(
+			createLogger("kafka-consumer-policy-rejected-tx"),
+			appSettings,
+			serviceSubtreeValidation+"."+appSettings.ClientName,
+		)
+		if err != nil {
+			return err
+		}
+
 		// Create the P2P client for the SubtreeValidation service
 		var p2pClient p2p.ClientI
 
@@ -808,6 +819,7 @@ func (d *Daemon) startValidationService(
 			blockchainClient,
 			subtreeConsumerClient,
 			txMetaConsumerClient,
+			policyRejectedTxConsumerClient,
 			p2pClient,
 		)
 		if err != nil {
@@ -934,6 +946,15 @@ func (d *Daemon) startValidatorService(
 		return err
 	}
 
+	var policyRejectedTxKafkaProducerClient *kafka.KafkaAsyncProducer
+
+	policyRejectedTxKafkaProducerClient, err = getKafkaTxPolicyRejectedAsyncProducer(
+		ctx, createLogger("kafka-producer-policy-rejected-tx"), appSettings,
+	)
+	if err != nil {
+		return err
+	}
+
 	// Create the BlockAssembly client for the Validator service
 	var blockAssemblyClient *blockassembly.Client
 
@@ -953,6 +974,7 @@ func (d *Daemon) startValidatorService(
 		consumerClient,
 		txMetaKafkaProducerClient,
 		rejectedTxKafkaProducerClient,
+		policyRejectedTxKafkaProducerClient,
 		blockAssemblyClient,
 	))
 }

@@ -182,6 +182,13 @@ func (d *Stores) GetValidatorClient(ctx context.Context, logger ulogger.Logger,
 			return nil, errors.NewServiceError("could not create rejectedTx kafka producer for local validator", err)
 		}
 
+		var policyRejectedTxKafkaProducerClient *kafka.KafkaAsyncProducer
+
+		policyRejectedTxKafkaProducerClient, err = getKafkaTxPolicyRejectedAsyncProducer(ctx, logger, appSettings)
+		if err != nil {
+			return nil, errors.NewServiceError("could not create policy-rejected tx kafka producer for local validator", err)
+		}
+
 		var blockAssemblyClient blockassembly.ClientI
 
 		blockAssemblyClient, err = d.GetBlockAssemblyClient(ctx, logger, appSettings)
@@ -204,6 +211,7 @@ func (d *Stores) GetValidatorClient(ctx context.Context, logger ulogger.Logger,
 			utxoStore,
 			txMetaKafkaProducerClient,
 			rejectedTxKafkaProducerClient,
+			policyRejectedTxKafkaProducerClient,
 			blockAssemblyClient,
 			blockchainClient,
 		)

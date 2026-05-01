@@ -106,6 +106,15 @@ type Server struct {
 	// Processes transaction metadata updates from other services
 	txmetaConsumerClient kafka.KafkaConsumerGroupI
 
+	// policyRejectedTxConsumerClient consumes policy-rejected transaction messages.
+	// These are consensus-valid transactions that our validator rejected on policy grounds.
+	// Raw tx bytes are cached locally so subtree validation can avoid HTTP fetches.
+	policyRejectedTxConsumerClient kafka.KafkaConsumerGroupI
+
+	// policyRejectedTxCache stores raw transaction bytes for policy-rejected transactions
+	// keyed by tx hash. Checked before requesting missing txs from other miners.
+	policyRejectedTxCache *txPolicyRejectedCache
+
 	// invalidSubtreeKafkaProducer publishes invalid subtree events to Kafka
 	invalidSubtreeKafkaProducer kafka.KafkaAsyncProducerI
 
@@ -171,6 +180,7 @@ func New(
 	blockchainClient blockchain.ClientI,
 	subtreeConsumerClient kafka.KafkaConsumerGroupI,
 	txmetaConsumerClient kafka.KafkaConsumerGroupI,
+	policyRejectedTxConsumerClient kafka.KafkaConsumerGroupI,
 	p2pClient P2PClientI,
 ) (*Server, error) {
 	u := &Server{
@@ -185,8 +195,9 @@ func New(
 		prioritySubtreeCheckActiveMap:     map[string]bool{},
 		prioritySubtreeCheckActiveMapLock: sync.Mutex{},
 		blockchainClient:                  blockchainClient,
-		subtreeConsumerClient:             subtreeConsumerClient,
+		subtreeConsumerClient:              subtreeConsumerClient,
 		txmetaConsumerClient:              txmetaConsumerClient,
+		policyRejectedTxConsumerClient:    policyRejectedTxConsumerClient,
 		invalidSubtreeDeDuplicateMap:      expiringmap.New[string, struct{}](time.Minute * 1),
 		p2pClient:                         p2pClient,
 	}
@@ -228,6 +239,15 @@ func New(
 		}
 	} else {
 		u.utxoStore = utxoStore
+	}
+
+	if tSettings.SubtreeValidation.TxPolicyRejectedCacheEnabled {
+		maxMB := tSettings.SubtreeValidation.TxPolicyRejectedCacheMaxMB
+		if maxMB <= 0 {
+			maxMB = 64
+		}
+		u.policyRejectedTxCache = newTxPolicyRejectedCache(maxMB * 1024 * 1024)
+		logger.Infof("Policy-rejected tx cache enabled (max %d MB)", maxMB)
 	}
 
 	// Initialize Kafka producer for invalid subtrees if configured
@@ -510,6 +530,10 @@ func (u *Server) Start(ctx context.Context, readyCh chan<- struct{}) error {
 	u.subtreeConsumerClient.Start(ctx, u.subtreeMessageHandler(ctx), kafka.WithLogErrorAndMoveOn())
 	u.txmetaConsumerClient.Start(ctx, u.txmetaMessageHandler(ctx), kafka.WithLogErrorAndMoveOn())
 
+	if u.policyRejectedTxConsumerClient != nil && u.policyRejectedTxCache != nil {
+		u.policyRejectedTxConsumerClient.Start(ctx, u.policyRejectedTxMessageHandler(ctx), kafka.WithLogErrorAndMoveOn())
+	}
+
 	// this will block
 	if err := util.StartGRPCServer(ctx, u.logger, u.settings, "subtreevalidation", u.settings.SubtreeValidation.GRPCListenAddress, func(server *grpc.Server) {
 		subtreevalidation_api.RegisterSubtreeValidationAPIServer(server, u)
@@ -549,6 +573,12 @@ func (u *Server) Stop(_ context.Context) error {
 	if u.txmetaConsumerClient != nil {
 		if err := u.txmetaConsumerClient.Close(); err != nil {
 			u.logger.Errorf("[BlockValidation] failed to close kafka consumer gracefully: %v", err)
+		}
+	}
+
+	if u.policyRejectedTxConsumerClient != nil {
+		if err := u.policyRejectedTxConsumerClient.Close(); err != nil {
+			u.logger.Errorf("[SubtreeValidation] failed to close policy-rejected tx kafka consumer: %v", err)
 		}
 	}
 
