@@ -88,11 +88,15 @@ type TxMetaProcessor struct {
 	batchSize                          int
 	validateSubtreeInternalConcurrency int
 	missingTxThreshold                 uint32
-	cache                              *txmetacache.TxMetaCache
+	cache                              txMetaCacheReader
 	txHashes                           []chainhash.Hash
 	txMetaSlice                        []metaSliceItem
 	failFast                           bool
 	missed                             atomic.Uint32
+}
+
+type txMetaCacheReader interface {
+	GetMetaCached(ctx context.Context, hash chainhash.Hash, txmetaData *meta.Data) (bool, error)
 }
 
 func (p *TxMetaProcessor) processTxMetaUsingCache(i int) error {
@@ -101,7 +105,7 @@ func (p *TxMetaProcessor) processTxMetaUsingCache(i int) error {
 		found bool
 	)
 
-	txMeta := meta.Data{}
+	var txMeta meta.Data
 
 	for j := 0; j < subtree.Min(p.batchSize, len(p.txHashes)-i); j++ {
 		if p.txMetaSlice[i+j].isSet {
@@ -120,6 +124,7 @@ func (p *TxMetaProcessor) processTxMetaUsingCache(i int) error {
 			continue
 		}
 
+		txMeta = meta.Data{}
 		found, err = p.cache.GetMetaCached(p.ctx, txHash, &txMeta)
 		if err != nil && !errors.Is(err, errors.ErrNotFound) {
 			p.logger.Warnf("[processTxMetaUsingCache] error retrieving txMeta for %s: %v", txHash.String(), err)

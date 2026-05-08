@@ -45,68 +45,66 @@ func (u *Server) txmetaHandler(ctx context.Context, msg *kafka.KafkaMessage) err
 		return nil
 	}
 
-	// Process the message asynchronously to avoid blocking the Kafka consumer.
-	// Errors are logged but do not prevent message acknowledgment.
-	go func() {
-		startTime := time.Now()
+	// Copy the payload so future asynchronous refactors cannot accidentally
+	// retain a Kafka buffer past callback lifetime.
+	data := append([]byte(nil), msg.Value...)
+	offset := 0
 
-		data := msg.Value
-		offset := 0
+	// Read entry count
+	entryCount := binary.LittleEndian.Uint32(data[offset:])
+	offset += 4
 
-		// Read entry count
-		if len(data) < 4 {
-			return
+	var hash chainhash.Hash
+
+	// Process each entry synchronously within callback lifetime.
+	for i := uint32(0); i < entryCount; i++ {
+		// Check minimum bytes for hash + action + length
+		if offset+32+1+4 > len(data) {
+			prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
+			u.logger.Errorf("[txmetaHandler] truncated message at entry %d", i)
+			return nil
 		}
-		entryCount := binary.LittleEndian.Uint32(data[offset:])
+
+		// Read hash (32 bytes)
+		copy(hash[:], data[offset:offset+32])
+		offset += 32
+
+		// Read action (1 byte)
+		action := data[offset]
+		offset++
+
+		// Read content length (4 bytes)
+		contentLen := binary.LittleEndian.Uint32(data[offset:])
 		offset += 4
 
-		var hash chainhash.Hash
-
-		// Process each entry
-		for i := uint32(0); i < entryCount; i++ {
-			// Check minimum bytes for hash + action + length
-			if offset+32+1+4 > len(data) {
-				u.logger.Errorf("[txmetaHandler] truncated message at entry %d", i)
-				return
+		if action == txmetaActionDELETE {
+			opStart := time.Now()
+			// Handle DELETE
+			if err := u.DelTxMetaCache(ctx, &hash); err != nil {
+				prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
+				u.logger.Errorf("[txmetaHandler][%s] failed to delete tx meta data: %v", hash, err)
 			}
-
-			// Read hash (32 bytes)
-			copy(hash[:], data[offset:offset+32])
-			offset += 32
-
-			// Read action (1 byte)
-			action := data[offset]
-			offset++
-
-			// Read content length (4 bytes)
-			contentLen := binary.LittleEndian.Uint32(data[offset:])
-			offset += 4
-
-			if action == txmetaActionDELETE {
-				// Handle DELETE
-				if err := u.DelTxMetaCache(ctx, &hash); err != nil {
-					prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
-					u.logger.Errorf("[txmetaHandler][%s] failed to delete tx meta data: %v", hash, err)
-				}
-				prometheusSubtreeValidationDelTXMetaCacheKafka.Observe(float64(time.Since(startTime).Microseconds()) / 1_000_000)
-			} else {
-				// Handle ADD
-				if offset+int(contentLen) > len(data) {
-					u.logger.Errorf("[txmetaHandler] truncated content at entry %d", i)
-					return
-				}
-
-				content := data[offset : offset+int(contentLen)]
-				offset += int(contentLen)
-
-				if err := u.SetTxMetaCacheFromBytes(ctx, hash[:], content); err != nil {
-					prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
-					u.logger.Debugf("[txmetaHandler][%s] failed to set tx meta data: %v", hash, err)
-				}
-				prometheusSubtreeValidationSetTXMetaCacheKafka.Observe(float64(time.Since(startTime).Microseconds()) / 1_000_000)
-			}
+			prometheusSubtreeValidationDelTXMetaCacheKafka.Observe(float64(time.Since(opStart).Microseconds()) / 1_000_000)
+			continue
 		}
-	}()
+
+		// Handle ADD
+		if offset+int(contentLen) > len(data) {
+			prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
+			u.logger.Errorf("[txmetaHandler] truncated content at entry %d", i)
+			return nil
+		}
+
+		content := data[offset : offset+int(contentLen)]
+		offset += int(contentLen)
+
+		opStart := time.Now()
+		if err := u.SetTxMetaCacheFromBytes(ctx, hash[:], content); err != nil {
+			prometheusSubtreeValidationSetTXMetaCacheKafkaErrors.Inc()
+			u.logger.Errorf("[txmetaHandler][%s] failed to set tx meta data: %v", hash, err)
+		}
+		prometheusSubtreeValidationSetTXMetaCacheKafka.Observe(float64(time.Since(opStart).Microseconds()) / 1_000_000)
+	}
 
 	return nil
 }

@@ -271,10 +271,7 @@ func (t *TxMetaCache) SetCacheFromBytes(key, txMetaBytes []byte) error {
 // Returns:
 // - Error if the batch cache operation fails
 func (t *TxMetaCache) SetCacheMulti(keys [][]byte, values [][]byte) error {
-	valuesWithHeight := make([][]byte, len(values))
-	for i, value := range values {
-		valuesWithHeight[i] = t.appendHeightToValue(value)
-	}
+	valuesWithHeight := t.valuesWithHeight(values)
 
 	err := t.cache.SetMulti(keys, valuesWithHeight)
 	if err != nil {
@@ -286,16 +283,18 @@ func (t *TxMetaCache) SetCacheMulti(keys [][]byte, values [][]byte) error {
 	return nil
 }
 
-func (t *TxMetaCache) SetCacheMultiValuesRaw(keys [][]byte, values [][]byte) error {
-
-	err := t.cache.SetMulti(keys, values)
-	if err != nil {
-		return err
+func (t *TxMetaCache) valuesWithHeight(values [][]byte) [][]byte {
+	valuesWithHeight := make([][]byte, len(values))
+	for i, value := range values {
+		valuesWithHeight[i] = t.appendHeightToValue(value)
 	}
+	return valuesWithHeight
+}
 
-	t.metrics.insertions.Add(uint64(len(keys)))
-
-	return nil
+// SetCacheMultiValuesRaw is retained for API compatibility, but now routes to
+// SetCacheMulti so all cache-write paths use a single on-disk format.
+func (t *TxMetaCache) SetCacheMultiValuesRaw(keys [][]byte, values [][]byte) error {
+	return t.SetCacheMulti(keys, values)
 }
 
 // GetMetaCached retrieves transaction metadata from the cache without falling back to the
@@ -461,7 +460,7 @@ func (t *TxMetaCache) BatchDecorate(ctx context.Context, hashes []*utxo.Unresolv
 	}
 
 	if len(keys) > 0 {
-		if err := t.SetCacheMultiValuesRaw(keys, values); err != nil {
+		if err := t.SetCacheMulti(keys, values); err != nil {
 			// Preserve prior behavior: cache population failures are logged but don't fail BatchDecorate.
 			if errors.Is(err, errors.ErrProcessing) {
 				t.logger.Debugf("error setting cache batch for %d txMeta entries: %v", len(keys), err)

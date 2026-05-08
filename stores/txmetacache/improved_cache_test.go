@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -842,6 +843,35 @@ func TestImprovedCache_CleanLockedMapPreallocated(t *testing.T) {
 		stats.ValidEntriesCount, stats.TotalElementsAdded, stats.TrimCount)
 }
 
+func TestBucketPreallocated_TrimPreservesChunkBackingBuffers(t *testing.T) {
+	b := &bucketPreallocated{}
+	require.NoError(t, b.Init(ChunkSize*4, 50))
+	defer b.Reset()
+
+	originalChunkPtrs := make(map[uintptr]struct{}, len(b.chunks))
+	for _, chunk := range b.chunks {
+		require.NotZero(t, len(chunk))
+		originalChunkPtrs[uintptr(unsafe.Pointer(&chunk[0]))] = struct{}{}
+	}
+
+	key := make([]byte, 32)
+	value := make([]byte, 256)
+
+	// Force at least one trim cycle.
+	for i := 0; i < 300; i++ {
+		binary.BigEndian.PutUint64(key[:8], uint64(i))
+		require.NoError(t, b.Set(key, value, uint64(i)))
+	}
+
+	require.Greater(t, b.trimCount, uint64(0), "expected at least one trim")
+
+	for idx, chunk := range b.chunks {
+		ptr := uintptr(unsafe.Pointer(&chunk[0]))
+		_, ok := originalChunkPtrs[ptr]
+		require.True(t, ok, "chunk %d no longer points to original preallocated backing buffer", idx)
+	}
+}
+
 // TestImprovedCache_GenerationWraparound tests generation wraparound scenarios
 func TestImprovedCache_GenerationWraparound(t *testing.T) {
 	cache, err := New(4*1024, Trimmed) // Very small cache
@@ -1010,6 +1040,34 @@ func TestImprovedCache_OverfillRecentKeysRetrievable(t *testing.T) {
 		var dst []byte
 		_ = cache.Get(&dst, key) // may or may not find
 	}
+}
+
+func TestImprovedCache_SetMultiKeysSingleValue_BoundsValueAndDoesNotMutateInput(t *testing.T) {
+	cache, err := New(64*1024, Unallocated)
+	require.NoError(t, err)
+	defer cache.Reset()
+
+	key := []byte("bounded_key")
+	existingValue := make([]byte, 1900)
+	for i := range existingValue {
+		existingValue[i] = 'a'
+	}
+	require.NoError(t, cache.Set(key, existingValue))
+
+	value := make([]byte, 400)
+	for i := range value {
+		value[i] = 'b'
+	}
+	valueSnapshot := append([]byte(nil), value...)
+
+	require.NoError(t, cache.SetMultiKeysSingleValue([][]byte{key}, value, 1))
+	require.Equal(t, valueSnapshot, value, "input value slice must not be mutated")
+
+	var got []byte
+	require.NoError(t, cache.Get(&got, key))
+	require.LessOrEqual(t, len(got), (1<<maxValueSizeLog)-1)
+	require.GreaterOrEqual(t, len(got), len(valueSnapshot))
+	require.Equal(t, valueSnapshot, got[:len(valueSnapshot)], "new value should be retained when bounded")
 }
 
 // TestImprovedCache_CleanLockedMapEdgeCases tests edge cases in cleanLockedMap

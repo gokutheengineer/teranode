@@ -57,6 +57,30 @@ func generateTestHashes(count int) []chainhash.Hash {
 	return hashes
 }
 
+type cacheStateLeakStub struct {
+	call int
+}
+
+func (s *cacheStateLeakStub) GetMetaCached(_ context.Context, _ chainhash.Hash, txmetaData *meta.Data) (bool, error) {
+	s.call++
+	switch s.call {
+	case 1:
+		txmetaData.Fee = 1
+		txmetaData.SizeInBytes = 10
+		txmetaData.Creating = true
+		txmetaData.TxInpoints = subtree.TxInpoints{ParentTxHashes: []chainhash.Hash{}}
+	case 2:
+		txmetaData.Fee = 2
+		txmetaData.SizeInBytes = 20
+		// Intentionally do not touch Creating to emulate deserializers
+		// that populate only a subset of fields.
+		txmetaData.TxInpoints = subtree.TxInpoints{ParentTxHashes: []chainhash.Hash{}}
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
 func populateCache(t testing.TB, cache *txmetacache.TxMetaCache, hashes []chainhash.Hash) {
 	t.Helper()
 	testMeta := &meta.Data{
@@ -231,6 +255,27 @@ func TestProcessTxMetaUsingCache_FailFastThresholdExceeded(t *testing.T) {
 	_, err := server.processTxMetaUsingCache(ctx, txHashes, txMetaSlice, true)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, errors.ErrProcessing))
+}
+
+func TestTxMetaProcessor_ProcessTxMetaUsingCache_ResetsMetaStateEachIteration(t *testing.T) {
+	txHashes := generateTestHashes(2)
+	txMetaSlice := make([]metaSliceItem, len(txHashes))
+	stubCache := &cacheStateLeakStub{}
+
+	processor := &TxMetaProcessor{
+		ctx:         context.Background(),
+		logger:      ulogger.TestLogger{},
+		batchSize:   len(txHashes),
+		cache:       stubCache,
+		txHashes:    txHashes,
+		txMetaSlice: txMetaSlice,
+	}
+
+	err := processor.processTxMetaUsingCache(0)
+	require.NoError(t, err)
+
+	require.True(t, processor.txMetaSlice[0].creating, "first entry should carry Creating=true")
+	require.False(t, processor.txMetaSlice[1].creating, "second entry must not leak Creating=true from previous iteration")
 }
 
 func TestProcessTxMetaUsingCache_FailFastNotTriggered(t *testing.T) {

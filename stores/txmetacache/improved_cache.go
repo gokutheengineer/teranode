@@ -151,6 +151,29 @@ func calcInitialAllocChunks(maxSlabChunks uint64, maxChunks uint64) uint64 {
 	return initial
 }
 
+const maxSetMultiValueSize = (1 << maxValueSizeLog) - 1
+
+func prepareSetMultiValue(value []byte) []byte {
+	return append([]byte(nil), value...)
+}
+
+func boundedSetMultiValue(value []byte) ([]byte, bool) {
+	if len(value) <= maxSetMultiValueSize {
+		return value, false
+	}
+
+	// Keep the most recently appended prefix and cap the payload to fit
+	// bucket value-size constraints, so SetMultiKeysSingleValue does not
+	// silently fail once values grow past cache limits.
+	return append([]byte(nil), value[:maxSetMultiValueSize]...), true
+}
+
+func recordSetMultiValueTruncation() {
+	if prometheusBlockValidationTxMetaCacheSetMultiValueTruncations != nil {
+		prometheusBlockValidationTxMetaCacheSetMultiValueTruncations.Inc()
+	}
+}
+
 // -------------------------------------------------------------------
 // Cache size configuration constants
 //
@@ -375,10 +398,12 @@ func (c *ImprovedCache) Set(k, v []byte) error {
 // - Error if the operation fails, particularly if keys length is not a multiple of keySize
 //
 // Implementation details:
-// - Distributes keys across appropriate buckets based on hash value
-// - Uses concurrent processing with goroutines for better performance
-// - Appends new value bytes to existing values rather than overwriting
-// - Optimized for scenarios like associating multiple transactions with a block ID
+//   - Distributes keys across appropriate buckets based on hash value
+//   - Uses concurrent processing with goroutines for better performance
+//   - Appends new value bytes to existing values rather than overwriting
+//   - Caps per-entry payload to maxSetMultiValueSize bytes and increments
+//     tx_meta_cache_set_multi_value_truncations_total when truncation occurs
+//   - Optimized for scenarios like associating multiple transactions with a block ID
 func (c *ImprovedCache) SetMultiKeysSingleValue(keys [][]byte, value []byte, keySize int) error {
 	if len(keys)%keySize != 0 {
 		return errors.NewProcessingError("keys length must be a multiple of keySize; got %d; want %d", len(keys), keySize)
@@ -430,6 +455,7 @@ func (c *ImprovedCache) SetMultiKeysSingleValue(keys [][]byte, value []byte, key
 // - key to bucket: [0..31 -b0, 32..63 -b1, 64..95 -b2, 96..127 -b3, 128..159 -b4, 160..191 -b5, 192..223 -b6, 224..255 -b7, 256..287 -b0, 288..319 -b1, 320..351 -b2, 352..383 -b3, 384..415 -b4, 416..447 -b5, 448..479 -b6, 480..511 -b7]
 // Value: single block id is sent for all keys. 4 bytes for each block ID, there can be more than one block ID per key.
 // Value bytes are appended to the end of the previous value bytes.
+// Per-entry values are capped to maxSetMultiValueSize bytes to avoid silent Set failures.
 func (c *ImprovedCache) SetMultiKeysSingleValueAppended(keys []byte, value []byte, keySize int) error {
 	if len(keys)%keySize != 0 {
 		return errors.NewProcessingError("keys length must be a multiple of keySize; got %d; want %d", len(keys), keySize)
@@ -932,19 +958,24 @@ func (b *bucketNative) Get(dst *[]byte, key []byte, h uint64, returnDst bool, sk
 	return found
 }
 
-// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v. Appends v to the existing v value, doesn't overwrite.
+// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v.
+// It appends v to the existing value and caps the result to maxSetMultiValueSize bytes.
 func (b *bucketNative) SetMultiKeysSingleValue(keys [][]byte, value []byte) { // , hashes []uint64) { //error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	var prevValue []byte
+	baseValue := prepareSetMultiValue(value)
 
 	var hash uint64
 
 	for _, key := range keys {
-		prevValue = value
+		prevValue := prepareSetMultiValue(baseValue)
 		hash = xxhash.Sum64(key)
 		b.Get(&prevValue, key, hash, true, true) // skipLocking=true: caller already holds b.mu write lock
+		prevValue, truncated := boundedSetMultiValue(prevValue)
+		if truncated {
+			recordSetMultiValueTruncation()
+		}
 		// TODO: consider logging if set is not successful. But this should only happen when the key-value size is too big.
 		_ = b.Set(key, prevValue, hash, true) // skipLocking=true: caller already holds b.mu write lock
 	}
@@ -1368,19 +1399,24 @@ end:
 	return found
 }
 
-// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v. Appends v to the existing v value, doesn't overwrite.
+// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v.
+// It appends v to the existing value and caps the result to maxSetMultiValueSize bytes.
 func (b *bucketTrimmed) SetMultiKeysSingleValue(keys [][]byte, value []byte) { // , hashes []uint64) { //error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	var prevValue []byte
+	baseValue := prepareSetMultiValue(value)
 
 	var hash uint64
 
 	for _, key := range keys {
-		prevValue = value
+		prevValue := prepareSetMultiValue(baseValue)
 		hash = xxhash.Sum64(key)
 		b.Get(&prevValue, key, hash, true, true)
+		prevValue, truncated := boundedSetMultiValue(prevValue)
+		if truncated {
+			recordSetMultiValueTruncation()
+		}
 		// TODO: consider logging if set is not successful. But this should only happen when the key-value size is too big.
 		_ = b.Set(key, prevValue, hash, true)
 	}
@@ -1679,14 +1715,14 @@ func (b *bucketPreallocated) Set(k, v []byte, h uint64, skipLocking ...bool) err
 			numOfChunksToRemove := int(math.Ceil(float64(len(chunks)*b.trimRatio) / float64(100)))
 			numOfChunksToKeep := len(chunks) - numOfChunksToRemove
 
-			// Shift the more recent half of the chunks to the start of the array
+			// Compact in-place to preserve the original mmap-backed chunk storage.
 			for i := 0; i < numOfChunksToKeep; i++ {
-				chunks[i] = chunks[i+numOfChunksToRemove]
+				copy(chunks[i], chunks[i+numOfChunksToRemove])
 			}
 
-			// Clear the rest of the chunks
+			// Clear trimmed chunk regions so they can be safely reused.
 			for i := numOfChunksToKeep; i < len(chunks); i++ {
-				chunks[i] = make([]byte, ChunkSize)
+				clear(chunks[i])
 			}
 
 			// writing needs to start form the end of the kept chunks.
@@ -2121,19 +2157,24 @@ end:
 	return found
 }
 
-// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v. Appends v to the existing v value, doesn't overwrite.
+// SetMultiKeysSingleValue stores multiple (k, v) entries for the same bucket for a single v.
+// It appends v to the existing value and caps the result to maxSetMultiValueSize bytes.
 func (b *bucketUnallocated) SetMultiKeysSingleValue(keys [][]byte, value []byte) { // , hashes []uint64) { //error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	var prevValue []byte
+	baseValue := prepareSetMultiValue(value)
 
 	var hash uint64
 
 	for _, key := range keys {
-		prevValue = value
+		prevValue := prepareSetMultiValue(baseValue)
 		hash = xxhash.Sum64(key)
 		b.Get(&prevValue, key, hash, true, true)
+		prevValue, truncated := boundedSetMultiValue(prevValue)
+		if truncated {
+			recordSetMultiValueTruncation()
+		}
 		// TODO: consider logging if set is not successful. But this should only happen when the key-value size is too big.
 		_ = b.Set(key, prevValue, hash, true)
 	}

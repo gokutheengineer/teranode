@@ -657,6 +657,45 @@ func Test_txMetaCache_MultiOperations(t *testing.T) {
 		require.Equal(t, metaData2.Fee, metaGet2.Fee)
 	})
 
+	t.Run("test SetCacheMultiValuesRaw normalizes to height-encoded format", func(t *testing.T) {
+		ctx := context.Background()
+		utxoStoreURL, err := url.Parse("sqlitememory:///test")
+		require.NoError(t, err)
+
+		utxoStore, err := sql.New(ctx, ulogger.TestLogger{}, settings.NewSettings(), utxoStoreURL)
+		require.NoError(t, err)
+		require.NoError(t, utxoStore.SetBlockHeight(321))
+
+		c, err := NewTxMetaCache(ctx, settings.NewSettings(), ulogger.TestLogger{}, utxoStore, Unallocated)
+		require.NoError(t, err)
+
+		cache := c.(*TxMetaCache)
+
+		hash, err := chainhash.NewHashFromStr("c7fa2d4d23292bef7e13ffbb8c03168c97c457e1681642bf49b3e2ba7d26bb91")
+		require.NoError(t, err)
+
+		metaData := &meta.Data{
+			Fee:         123,
+			SizeInBytes: 456,
+			TxInpoints:  subtree.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
+			BlockIDs:    make([]uint32, 0),
+		}
+		metaBytes, err := metaData.MetaBytes()
+		require.NoError(t, err)
+
+		err = cache.SetCacheMultiValuesRaw([][]byte{hash[:]}, [][]byte{metaBytes})
+		require.NoError(t, err)
+
+		cachedBytes := make([]byte, 0)
+		require.NoError(t, cache.cache.Get(&cachedBytes, hash[:]))
+		require.Equal(t, len(metaBytes)+4, len(cachedBytes), "raw batch writer must use same format as SetCacheMulti/SetCache")
+
+		got := &meta.Data{}
+		require.NoError(t, meta.NewMetaDataFromBytes(cachedBytes, got))
+		require.Equal(t, metaData.Fee, got.Fee)
+		require.Equal(t, metaData.SizeInBytes, got.SizeInBytes)
+	})
+
 	t.Run("test multi operations with empty data", func(t *testing.T) {
 		ctx := context.Background()
 		utxoStoreURL, err := url.Parse("sqlitememory:///test")

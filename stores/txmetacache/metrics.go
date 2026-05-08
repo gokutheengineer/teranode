@@ -41,6 +41,8 @@ var (
 	prometheusBlockValidationTxMetaCacheCurrentGenEntries prometheus.Gauge
 	// Count of valid entries from the previous generation not yet overwritten
 	prometheusBlockValidationTxMetaCachePreviousGenEntries prometheus.Gauge
+	// Count of SetMultiKeysSingleValue value truncations to enforce cache-size limits.
+	prometheusBlockValidationTxMetaCacheSetMultiValueTruncations prometheus.Counter
 )
 
 var (
@@ -226,6 +228,15 @@ func _initPrometheusMetrics() {
 			Subsystem: "tx_meta_cache",
 			Name:      "previous_gen_entries",
 			Help:      "Number of valid entries from the previous generation in the tx meta cache",
+		},
+	)
+
+	prometheusBlockValidationTxMetaCacheSetMultiValueTruncations = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "teranode",
+			Subsystem: "tx_meta_cache",
+			Name:      "set_multi_value_truncations_total",
+			Help:      "Number of tx meta values truncated by SetMultiKeysSingleValue to satisfy cache size limits",
 		},
 	)
 }

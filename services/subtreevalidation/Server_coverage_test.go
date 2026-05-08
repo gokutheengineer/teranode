@@ -245,6 +245,34 @@ func TestServerNew(t *testing.T) {
 		require.NotNil(t, server)
 	})
 
+	t.Run("tx meta cache init failure falls back to uncached store", func(t *testing.T) {
+		common := testutil.NewCommonTestSetup(t)
+		tSettings := common.Settings
+		tSettings.SubtreeValidation.QuorumPath = "/tmp/test-quorum"
+		tSettings.SubtreeValidation.TxMetaCacheEnabled = true
+		tSettings.Kafka.InvalidSubtrees = ""
+
+		// Force NewTxMetaCache -> New(...) failure.
+		gocore.Config().Set("txMetaCacheMaxMB", "0")
+		t.Cleanup(func() {
+			gocore.Config().Set("txMetaCacheMaxMB", "1024")
+		})
+
+		subtreeStore := testutil.NewMemoryBlobStore()
+		txStore := testutil.NewMemoryBlobStore()
+		utxoStore := &utxo.MockUtxostore{}
+		validatorClient := &mockValidator{}
+		blockchainClient := testutil.NewMemorySQLiteBlockchainClient(common.Logger, common.Settings, t)
+		subtreeConsumer := setupMemoryKafkaConsumer(t, "subtrees-topic-cache-fallback")
+		txmetaConsumer := setupMemoryKafkaConsumer(t, "txmeta-topic-cache-fallback")
+
+		server, err := New(common.Ctx, common.Logger, tSettings, subtreeStore, txStore, utxoStore,
+			validatorClient, blockchainClient, subtreeConsumer, txmetaConsumer, nil)
+		require.NoError(t, err)
+		require.NotNil(t, server)
+		require.Equal(t, utxoStore, server.utxoStore, "server must fall back to uncached store on cache init failure")
+	})
+
 	t.Run("with invalid subtree kafka producer", func(t *testing.T) {
 		common := testutil.NewCommonTestSetup(t)
 		tSettings := common.Settings

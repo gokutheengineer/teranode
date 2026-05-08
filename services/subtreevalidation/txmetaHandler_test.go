@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/bsv-blockchain/go-bt/v2"
 	"github.com/bsv-blockchain/go-bt/v2/chainhash"
@@ -241,7 +240,7 @@ func createKafkaMessage(t *testing.T, delete bool, content []byte) *kafka.KafkaM
 }
 
 func TestServer_txmetaHandler(t *testing.T) {
-	// Note: The handler processes messages asynchronously (in a goroutine) and always returns nil.
+	// Handler processes the Kafka payload synchronously and always returns nil.
 	// Tests verify proper parsing of the binary batch format.
 	tests := []struct {
 		name       string
@@ -281,10 +280,10 @@ func TestServer_txmetaHandler(t *testing.T) {
 			input: createKafkaMessage(t, false, []byte("test data")),
 		},
 		{
-			name: "failed set operation logs debug",
+			name: "failed set operation logs error",
 			setupMocks: func(l *mockLogger, c *mockCache) {
 				c.On("SetCacheFromBytes", mock.Anything, mock.Anything).Return(errors.ErrProcessing)
-				l.On("Debugf", mock.Anything, mock.Anything).Return()
+				l.On("Errorf", mock.Anything, mock.Anything).Return()
 			},
 			input: createKafkaMessage(t, false, []byte("test data")),
 		},
@@ -301,15 +300,46 @@ func TestServer_txmetaHandler(t *testing.T) {
 				utxoStore: mockCache,
 			}
 
-			// The handler always returns nil (async processing)
+			// The handler always returns nil.
 			err := server.txmetaHandler(context.Background(), tt.input)
 			assert.NoError(t, err)
-
-			// Wait briefly for async goroutine to complete
-			// This is a bit awkward but necessary since processing is async
-			<-time.After(10 * time.Millisecond)
 
 			mockCache.AssertExpectations(t)
 		})
 	}
+}
+
+func TestServer_txmetaHandler_IsSynchronous(t *testing.T) {
+	mockLogger := &mockLogger{}
+	mockCache := &mockCache{}
+
+	enteredSet := make(chan struct{})
+	releaseSet := make(chan struct{})
+
+	mockCache.On("SetCacheFromBytes", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
+		close(enteredSet)
+		<-releaseSet
+	}).Return(nil)
+
+	server := &Server{
+		logger:    mockLogger,
+		utxoStore: mockCache,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- server.txmetaHandler(context.Background(), createKafkaMessage(t, false, []byte("test data")))
+	}()
+
+	<-enteredSet
+
+	select {
+	case <-done:
+		t.Fatal("txmetaHandler returned before SetCacheFromBytes finished")
+	default:
+	}
+
+	close(releaseSet)
+	assert.NoError(t, <-done)
+	mockCache.AssertExpectations(t)
 }

@@ -224,7 +224,8 @@ func New(
 
 		u.utxoStore, err = txmetacache.NewTxMetaCache(ctx, tSettings, logger, utxoStore, txmetacache.Unallocated)
 		if err != nil {
-			logger.Errorf("Failed to create tx meta cache: %v", err)
+			logger.Errorf("Failed to create tx meta cache, falling back to uncached store: %v", err)
+			u.utxoStore = utxoStore
 		}
 	} else {
 		u.utxoStore = utxoStore
