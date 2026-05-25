@@ -294,3 +294,65 @@ func TestDiskTxMap_ExistenceLayerThroughput(t *testing.T) {
 	require.Greaterf(t, opsPerSec, 1_000_000.0,
 		"Existence layer must achieve >1M ops/sec (with -race), got %.0f ops/sec", opsPerSec)
 }
+
+func BenchmarkDiskTxMap_UpdateSubtreeIndex_PerNode(b *testing.B) {
+	const numEntries = 4096
+
+	m, err := NewDiskTxMap(DiskTxMapOptions{
+		BasePath:       b.TempDir(),
+		Prefix:         "bench-update-per-node",
+		FilterCapacity: numEntries * 2,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer m.Close()
+
+	hashes := make([]chainhash.Hash, numEntries)
+	for i := 0; i < numEntries; i++ {
+		hashes[i] = chainhash.HashH([]byte(fmt.Sprintf("update-per-node-%d", i)))
+		if _, ok := m.SetIfNotExists(hashes[i], makeInpoints(-1)); !ok {
+			b.Fatalf("failed to insert benchmark hash %d", i)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		subtreeIdx := int16(i % 32_000)
+		for _, hash := range hashes {
+			if err := m.UpdateSubtreeIndex(hash, subtreeIdx); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkDiskTxMap_UpdateSubtreeIndexes_Batched(b *testing.B) {
+	const numEntries = 4096
+
+	m, err := NewDiskTxMap(DiskTxMapOptions{
+		BasePath:       b.TempDir(),
+		Prefix:         "bench-update-batched",
+		FilterCapacity: numEntries * 2,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer m.Close()
+
+	hashes := make([]chainhash.Hash, numEntries)
+	for i := 0; i < numEntries; i++ {
+		hashes[i] = chainhash.HashH([]byte(fmt.Sprintf("update-batched-%d", i)))
+		if _, ok := m.SetIfNotExists(hashes[i], makeInpoints(-1)); !ok {
+			b.Fatalf("failed to insert benchmark hash %d", i)
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		subtreeIdx := int16(i % 32_000)
+		if err := m.UpdateSubtreeIndexes(hashes, subtreeIdx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

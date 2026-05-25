@@ -377,23 +377,78 @@ func (m *DiskTxMap) Close() error {
 
 // UpdateSubtreeIndex updates the SubtreeIndex for a hash in the correct disk shard.
 func (m *DiskTxMap) UpdateSubtreeIndex(hash chainhash.Hash, subtreeIndex int16) error {
-	m.flushDisk(m.diskOf(hash))
+	return m.UpdateSubtreeIndexes([]chainhash.Hash{hash}, subtreeIndex)
+}
 
-	d := &m.disks[m.diskOf(hash)]
-	val, err := d.store.Get(hash[:])
-	if err != nil || val == nil {
-		return errors.NewNotFoundError("entry not found for hash %s", hash.String())
+// UpdateSubtreeIndexes updates SubtreeIndex for a batch of hashes.
+// It flushes each affected disk shard at most once before reads/updates.
+func (m *DiskTxMap) UpdateSubtreeIndexes(hashes []chainhash.Hash, subtreeIndex int16) error {
+	if len(hashes) == 0 {
+		return nil
 	}
 
-	if len(val) >= 2 {
-		// Copy before modifying — BadgerDB returned bytes must not be mutated in-place
-		valCopy := make([]byte, len(val))
-		copy(valCopy, val)
-		binary.LittleEndian.PutUint16(valCopy[:2], uint16(subtreeIndex))
-		return d.store.Put(hash[:], valCopy)
+	groupedByDisk := make([][]chainhash.Hash, m.numDisks)
+	selectedDisks := make([]bool, m.numDisks)
+	for _, hash := range hashes {
+		diskIdx := m.diskOf(hash)
+		groupedByDisk[diskIdx] = append(groupedByDisk[diskIdx], hash)
+		selectedDisks[diskIdx] = true
 	}
 
-	return errors.NewProcessingError("value too short for hash %s", hash.String())
+	m.flushSelectedDisks(selectedDisks)
+
+	var (
+		failedCount int
+		firstErr    error
+	)
+
+	for diskIdx, diskHashes := range groupedByDisk {
+		if len(diskHashes) == 0 {
+			continue
+		}
+
+		d := &m.disks[diskIdx]
+		for _, hash := range diskHashes {
+			val, err := d.store.Get(hash[:])
+			if err != nil || val == nil {
+				failedCount++
+				if firstErr == nil {
+					firstErr = errors.NewNotFoundError("entry not found for hash %s", hash.String())
+				}
+				continue
+			}
+
+			if len(val) < 2 {
+				failedCount++
+				if firstErr == nil {
+					firstErr = errors.NewProcessingError("value too short for hash %s", hash.String())
+				}
+				continue
+			}
+
+			// Copy before modifying — BadgerDB returned bytes must not be mutated in-place
+			valCopy := make([]byte, len(val))
+			copy(valCopy, val)
+			binary.LittleEndian.PutUint16(valCopy[:2], uint16(subtreeIndex))
+			if err = d.store.Put(hash[:], valCopy); err != nil {
+				failedCount++
+				if firstErr == nil {
+					firstErr = errors.NewProcessingError("failed to write subtree index for hash %s", hash.String(), err)
+				}
+			}
+		}
+	}
+
+	if failedCount > 0 {
+		return errors.NewProcessingError(
+			"failed to update subtree index for %d/%d entries",
+			failedCount,
+			len(hashes),
+			firstErr,
+		)
+	}
+
+	return nil
 }
 
 // flushDisk sends a flush request to a single disk shard and waits for completion.
@@ -409,6 +464,22 @@ func (m *DiskTxMap) flushAllDisks() {
 	for i := range m.disks {
 		dones[i] = make(chan struct{})
 		m.disks[i].writeCh <- writeEntry{flushDone: dones[i]}
+	}
+	for _, done := range dones {
+		<-done
+	}
+}
+
+// flushSelectedDisks flushes the selected disk shards in parallel.
+func (m *DiskTxMap) flushSelectedDisks(selected []bool) {
+	dones := make([]chan struct{}, 0, m.numDisks)
+	for i := range m.disks {
+		if !selected[i] {
+			continue
+		}
+		done := make(chan struct{})
+		m.disks[i].writeCh <- writeEntry{flushDone: done}
+		dones = append(dones, done)
 	}
 	for _, done := range dones {
 		<-done

@@ -2107,9 +2107,7 @@ func (stp *SubtreeProcessor) processCompleteSubtree(skipNotification bool) (err 
 	// Store chainedIdx+1 so that 0 (zero value) means "unassigned" and is safe across serialization.
 	if stp.diskTxMap != nil {
 		idx := int16(chainedIdx + 1)
-		for _, node := range currentSubtree.Nodes {
-			_ = stp.diskTxMap.UpdateSubtreeIndex(node.Hash, idx)
-		}
+		stp.updateDiskSubtreeIndexes(currentSubtree.Nodes, idx)
 	}
 
 	stp.subtreesInBlock++ // Track number of subtrees in current block
@@ -4918,9 +4916,7 @@ func (stp *SubtreeProcessor) parallelBuildRemainderSubtrees(ctx context.Context,
 
 		if stp.diskTxMap != nil {
 			idx := int16(chainedIdx + 1)
-			for _, node := range oldSubtree.Nodes {
-				_ = stp.diskTxMap.UpdateSubtreeIndex(node.Hash, idx)
-			}
+			stp.updateDiskSubtreeIndexes(oldSubtree.Nodes, idx)
 		}
 
 		stp.subtreesInBlock++
@@ -4964,6 +4960,36 @@ func (stp *SubtreeProcessor) parallelBuildRemainderSubtrees(ctx context.Context,
 	}
 
 	return nil
+}
+
+// updateDiskSubtreeIndexes batch-updates SubtreeIndex for all non-coinbase tx hashes.
+// Any failure is logged so index maintenance errors are observable in production.
+func (stp *SubtreeProcessor) updateDiskSubtreeIndexes(nodes []subtreepkg.Node, subtreeIndex int16) {
+	if stp.diskTxMap == nil || len(nodes) == 0 {
+		return
+	}
+
+	hashes := make([]chainhash.Hash, 0, len(nodes))
+	for _, node := range nodes {
+		// Coinbase placeholder is not stored in DiskTxMap.
+		if node.Hash.Equal(subtreepkg.CoinbasePlaceholderHashValue) {
+			continue
+		}
+		hashes = append(hashes, node.Hash)
+	}
+
+	if len(hashes) == 0 {
+		return
+	}
+
+	if err := stp.diskTxMap.UpdateSubtreeIndexes(hashes, subtreeIndex); err != nil {
+		stp.logger.Warnf(
+			"[SubtreeProcessor] failed to update subtree indexes for %d txs (subtreeIndex=%d): %v",
+			len(hashes),
+			subtreeIndex,
+			err,
+		)
+	}
 }
 
 // parallelGetAndSetIfNotExists processes nodes in parallel, performing Get from currentTxMap

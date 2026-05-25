@@ -179,3 +179,43 @@ func TestDiskTxMap_SerializationRoundtrip(t *testing.T) {
 	require.Equal(t, int16(42), deserialized.SubtreeIndex)
 	require.Equal(t, len(ip.ParentTxHashes), len(deserialized.ParentTxHashes))
 }
+
+func TestDiskTxMap_UpdateSubtreeIndexes(t *testing.T) {
+	m := newTestDiskTxMap(t)
+
+	hash1 := chainhash.HashH([]byte("tx1"))
+	hash2 := chainhash.HashH([]byte("tx2"))
+
+	_, wasSet := m.SetIfNotExists(hash1, makeInpoints(-1))
+	require.True(t, wasSet)
+	_, wasSet = m.SetIfNotExists(hash2, makeInpoints(-1))
+	require.True(t, wasSet)
+
+	err := m.UpdateSubtreeIndexes([]chainhash.Hash{hash1, hash2}, 11)
+	require.NoError(t, err)
+
+	got1, ok := m.Get(hash1)
+	require.True(t, ok)
+	require.Equal(t, int16(11), got1.SubtreeIndex)
+
+	got2, ok := m.Get(hash2)
+	require.True(t, ok)
+	require.Equal(t, int16(11), got2.SubtreeIndex)
+}
+
+func TestDiskTxMap_UpdateSubtreeIndexes_ReturnsErrorButUpdatesExisting(t *testing.T) {
+	m := newTestDiskTxMap(t)
+
+	existing := chainhash.HashH([]byte("existing"))
+	missing := chainhash.HashH([]byte("missing"))
+
+	_, wasSet := m.SetIfNotExists(existing, makeInpoints(-1))
+	require.True(t, wasSet)
+
+	err := m.UpdateSubtreeIndexes([]chainhash.Hash{existing, missing}, 7)
+	require.Error(t, err)
+
+	got, ok := m.Get(existing)
+	require.True(t, ok)
+	require.Equal(t, int16(7), got.SubtreeIndex)
+}
