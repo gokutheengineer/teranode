@@ -658,7 +658,7 @@ func (stp *SubtreeProcessor) Start(ctx context.Context) {
 							Subtree:     incompleteSubtree,
 							ParentTxMap: stp.currentTxMap,
 							DeletedTxs:  stp.deletedTxs,
-							ErrChan:     make(chan error),
+							ErrChan:     make(chan error, 1),
 							OnStorageComplete: func() {
 								stp.cleanupDeletedTxs(incompleteSubtree)
 							},
@@ -724,7 +724,7 @@ func (stp *SubtreeProcessor) Start(ctx context.Context) {
 							send := NewSubtreeRequest{
 								Subtree:     incompleteSubtree,
 								ParentTxMap: stp.currentTxMap,
-								ErrChan:     make(chan error),
+								ErrChan:     make(chan error, 1),
 							}
 
 							select {
@@ -863,7 +863,7 @@ func (stp *SubtreeProcessor) Start(ctx context.Context) {
 							Subtree:     incompleteSubtree,
 							ParentTxMap: stp.currentTxMap,
 							DeletedTxs:  stp.deletedTxs,
-							ErrChan:     make(chan error),
+							ErrChan:     make(chan error, 1),
 							OnStorageComplete: func() {
 								stp.cleanupDeletedTxs(incompleteSubtree)
 							},
@@ -1005,7 +1005,7 @@ func (stp *SubtreeProcessor) Start(ctx context.Context) {
 
 							// Check if subtree is complete
 							if len(currentSubtree.Nodes) >= capSize {
-								if err = stp.processCompleteSubtree(false); err != nil {
+								if err = stp.processCompleteSubtree(processorCtx, false); err != nil {
 									stp.logger.Errorf("processCompleteSubtree failed: %s", err)
 								}
 
@@ -1984,7 +1984,7 @@ func (stp *SubtreeProcessor) InitCurrentBlockHeader(blockHeader *model.BlockHead
 //
 // Returns:
 //   - error: Any error encountered during addition
-func (stp *SubtreeProcessor) addNode(node subtreepkg.Node, parents *subtreepkg.TxInpoints, skipNotification bool) (err error) {
+func (stp *SubtreeProcessor) addNode(ctx context.Context, node subtreepkg.Node, parents *subtreepkg.TxInpoints, skipNotification bool) (err error) {
 	// parents can only be set to nil, when they are already in the map
 	if parents == nil {
 		if _, ok := stp.currentTxMap.Get(node.Hash); !ok {
@@ -2022,7 +2022,7 @@ func (stp *SubtreeProcessor) addNode(node subtreepkg.Node, parents *subtreepkg.T
 	}
 
 	if stp.currentSubtree.Load().IsComplete() {
-		if err = stp.processCompleteSubtree(skipNotification); err != nil {
+		if err = stp.processCompleteSubtree(ctx, skipNotification); err != nil {
 			return err
 		}
 	}
@@ -2040,7 +2040,7 @@ func (stp *SubtreeProcessor) addNode(node subtreepkg.Node, parents *subtreepkg.T
 //
 // Returns:
 //   - error: Any error encountered during addition
-func (stp *SubtreeProcessor) addNodePreValidated(node subtreepkg.Node, skipNotification bool) (err error) {
+func (stp *SubtreeProcessor) addNodePreValidated(ctx context.Context, node subtreepkg.Node, skipNotification bool) (err error) {
 	if stp.currentSubtree.Load() == nil {
 		itemsPerFile := int(stp.currentItemsPerFile.Load())
 
@@ -2063,7 +2063,7 @@ func (stp *SubtreeProcessor) addNodePreValidated(node subtreepkg.Node, skipNotif
 	}
 
 	if stp.currentSubtree.Load().IsComplete() {
-		if err = stp.processCompleteSubtree(skipNotification); err != nil {
+		if err = stp.processCompleteSubtree(ctx, skipNotification); err != nil {
 			return err
 		}
 	}
@@ -2071,10 +2071,10 @@ func (stp *SubtreeProcessor) addNodePreValidated(node subtreepkg.Node, skipNotif
 	return nil
 }
 
-func (stp *SubtreeProcessor) processCompleteSubtree(skipNotification bool) (err error) {
+func (stp *SubtreeProcessor) processCompleteSubtree(ctx context.Context, skipNotification bool) (err error) {
 	currentSubtree := stp.currentSubtree.Load()
 
-	_, _, deferFn := tracing.Tracer("blockassembly").Start(context.Background(), "storeSubtree",
+	_, _, deferFn := tracing.Tracer("blockassembly").Start(ctx, "storeSubtree",
 		tracing.WithParentStat(stp.stats),
 		tracing.WithHistogram(prometheusBlockAssemblySubtreeCompleteHist),
 		tracing.WithDebugLogMessage(stp.logger, "[SubtreeProcessor][processCompleteSubtree][%s] processing complete subtree", currentSubtree.RootHash().String()),
@@ -2125,9 +2125,8 @@ func (stp *SubtreeProcessor) processCompleteSubtree(skipNotification bool) (err 
 	stp.currentSubtree.Store(newSubtree)
 
 	// Send the subtree to the newSubtreeChan, including a reference to the parent transactions map
-	errCh := make(chan error)
-
-	stp.newSubtreeChan <- NewSubtreeRequest{
+	errCh := make(chan error, 1)
+	req := NewSubtreeRequest{
 		Subtree:          oldSubtree,
 		ParentTxMap:      stp.currentTxMap,
 		DeletedTxs:       stp.deletedTxs,
@@ -2137,13 +2136,20 @@ func (stp *SubtreeProcessor) processCompleteSubtree(skipNotification bool) (err 
 			stp.cleanupDeletedTxs(oldSubtree)
 		},
 	}
+	if err = stp.sendNewSubtreeRequest(ctx, req); err != nil {
+		return errors.NewProcessingError("[%s] error sending subtree to newSubtreeChan", oldSubtreeHash.String(), err)
+	}
 
 	// wait for the writing of the subtree to complete in a separate goroutine
-	go func() {
-		if err := <-errCh; err != nil {
-			stp.logger.Errorf("[%s] error sending subtree to newSubtreeChan: %v", oldSubtreeHash.String(), err)
+	go func(requestCtx context.Context) {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				stp.logger.Errorf("[%s] error sending subtree to newSubtreeChan: %v", oldSubtreeHash.String(), err)
+			}
+		case <-requestCtx.Done():
 		}
-	}()
+	}(ctx)
 
 	// Reset the announcement timer since we just announced a complete subtree
 	if !skipNotification {
@@ -2154,6 +2160,24 @@ func (stp *SubtreeProcessor) processCompleteSubtree(skipNotification bool) (err 
 	stp.updatePrecomputedMiningData()
 
 	return nil
+}
+
+func (stp *SubtreeProcessor) sendNewSubtreeRequest(ctx context.Context, request NewSubtreeRequest) error {
+	select {
+	case stp.newSubtreeChan <- request:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (stp *SubtreeProcessor) waitNewSubtreeRequest(ctx context.Context, errCh <-chan error) error {
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // AddBatch adds a batch of transaction nodes to the processor queue.
@@ -2177,7 +2201,7 @@ func (stp *SubtreeProcessor) AddBatch(nodes []subtreepkg.Node, txInpoints []*sub
 // Returns:
 //   - error: Any error encountered during addition
 func (stp *SubtreeProcessor) AddDirectly(node *subtreepkg.Node, txInpoints *subtreepkg.TxInpoints, skipNotification bool) error {
-	if err := stp.addNode(*node, txInpoints, skipNotification); err != nil {
+	if err := stp.addNode(context.Background(), *node, txInpoints, skipNotification); err != nil {
 		return errors.NewProcessingError("error adding node directly to subtree", err)
 	}
 
@@ -2267,7 +2291,7 @@ func (stp *SubtreeProcessor) AddNodesDirectly(txs []*utxostore.UnminedTransactio
 
 		// Check if subtree is complete
 		if len(currentSubtree.Nodes) >= capSize {
-			if err := stp.processCompleteSubtree(skipNotification); err != nil {
+			if err := stp.processCompleteSubtree(context.Background(), skipNotification); err != nil {
 				return errors.NewProcessingError("error processing complete subtree", err)
 			}
 
@@ -2539,7 +2563,7 @@ func (stp *SubtreeProcessor) reChainSubtrees(fromIndex int) error {
 			stp.currentTxMap.Delete(node.Hash)
 
 			// Re-add the node (adds back to currentTxMap)
-			if err = stp.addNode(node, parents, true); err != nil {
+			if err = stp.addNode(context.Background(), node, parents, true); err != nil {
 				// Restore to currentTxMap to avoid inconsistent state
 				stp.currentTxMap.Set(node.Hash, parents)
 				stp.deletedTxs.Delete(node.Hash)
@@ -3215,22 +3239,9 @@ func (stp *SubtreeProcessor) reorgBlocks(ctx context.Context, moveBackBlocks []*
 	putHashSlice(allMarkFalse)
 
 	// announce all the subtrees to the network
-	// this will also store it by the Server in the subtree store
-	for _, subtree := range stp.chainedSubtrees {
-		errCh := make(chan error)
-		stp.newSubtreeChan <- NewSubtreeRequest{
-			Subtree:     subtree,
-			ParentTxMap: stp.currentTxMap,
-			DeletedTxs:  stp.deletedTxs,
-			ErrChan:     errCh,
-			OnStorageComplete: func() {
-				stp.cleanupDeletedTxs(subtree)
-			},
-		}
-
-		if err = <-errCh; err != nil {
-			return errors.NewProcessingError("[reorgBlocks] error sending subtree to newSubtreeChan", err)
-		}
+	// this will also store them by the Server in the subtree store
+	if err = stp.announceChainedSubtrees(ctx); err != nil {
+		return errors.NewProcessingError("[reorgBlocks] error sending subtree to newSubtreeChan", err)
 	}
 
 	// Mark all the moveForwardBlocks as processed
@@ -3252,6 +3263,29 @@ func (stp *SubtreeProcessor) reorgBlocks(ctx context.Context, moveBackBlocks []*
 		stp.finalizeBlockProcessing(ctx, block)
 	} else {
 		return errors.NewProcessingError("[reorgBlocks] no blocks to finalize after reorg")
+	}
+
+	return nil
+}
+
+func (stp *SubtreeProcessor) announceChainedSubtrees(ctx context.Context) error {
+	for _, subtree := range stp.chainedSubtrees {
+		errCh := make(chan error, 1)
+		req := NewSubtreeRequest{
+			Subtree:     subtree,
+			ParentTxMap: stp.currentTxMap,
+			DeletedTxs:  stp.deletedTxs,
+			ErrChan:     errCh,
+			OnStorageComplete: func() {
+				stp.cleanupDeletedTxs(subtree)
+			},
+		}
+		if err := stp.sendNewSubtreeRequest(ctx, req); err != nil {
+			return err
+		}
+		if err := stp.waitNewSubtreeRequest(ctx, errCh); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -3375,7 +3409,7 @@ func (stp *SubtreeProcessor) moveBackBlockAddPreviousNodes(ctx context.Context, 
 				continue
 			}
 
-			if err := stp.addNode(node, nil, true); err != nil {
+			if err := stp.addNode(ctx, node, nil, true); err != nil {
 				return errors.NewProcessingError("[moveBackBlock:AddPreviousNodes][%s] error adding node to subtree", block.String(), err)
 			}
 		}
@@ -3388,7 +3422,7 @@ func (stp *SubtreeProcessor) moveBackBlockAddPreviousNodes(ctx context.Context, 
 			continue
 		}
 
-		if err := stp.addNode(node, nil, true); err != nil {
+		if err := stp.addNode(ctx, node, nil, true); err != nil {
 			return errors.NewProcessingError("[moveBackBlock:AddPreviousNodes][%s] error adding node to subtree", block.String(), err)
 		}
 	}
@@ -3432,7 +3466,7 @@ func (stp *SubtreeProcessor) moveBackBlockCreateNewSubtrees(ctx context.Context,
 
 	// run through the nodes of the subtrees in order and add to the new subtrees
 	if len(subtreesNodes) > 0 {
-		if err = stp.addMoveBackBlockNodesToSubtrees(block, subtreesNodes, subtreeMetaTxInpoints); err != nil {
+		if err = stp.addMoveBackBlockNodesToSubtrees(ctx, block, subtreesNodes, subtreeMetaTxInpoints); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -3458,7 +3492,7 @@ func (stp *SubtreeProcessor) moveBackBlockCreateNewSubtrees(ctx context.Context,
 // Falls back to the original serial path for small blocks or when the
 // configured currentTxMap is not the in-memory SplitTxInpointsMap (DiskTxMap
 // path).
-func (stp *SubtreeProcessor) addMoveBackBlockNodesToSubtrees(block *model.Block,
+func (stp *SubtreeProcessor) addMoveBackBlockNodesToSubtrees(ctx context.Context, block *model.Block,
 	subtreesNodes [][]subtreepkg.Node, subtreeMetaTxInpoints [][]subtreepkg.TxInpoints) error {
 	totalNodes := 0
 	for _, ss := range subtreesNodes {
@@ -3480,7 +3514,7 @@ func (stp *SubtreeProcessor) addMoveBackBlockNodesToSubtrees(block *model.Block,
 			}
 
 			for i := startI; i < len(subtreeNodes); i++ {
-				if err := stp.addNode(subtreeNodes[i], &subtreeMetaTxInpoints[idx][i], true); err != nil {
+				if err := stp.addNode(ctx, subtreeNodes[i], &subtreeMetaTxInpoints[idx][i], true); err != nil {
 					return errors.NewProcessingError("[moveBackBlock:CreateNewSubtrees][%s][%s] error adding node to subtree", block.String(), subtreeHash.String(), err)
 				}
 			}
@@ -3573,7 +3607,7 @@ func (stp *SubtreeProcessor) addMoveBackBlockNodesToSubtrees(block *model.Block,
 				continue
 			}
 
-			if err := stp.addNodePreValidated(subtreeNodes[i], true); err != nil {
+			if err := stp.addNodePreValidated(ctx, subtreeNodes[i], true); err != nil {
 				return errors.NewProcessingError("[moveBackBlock:CreateNewSubtrees][%s][%s] error adding node to subtree", block.String(), subtreeHash.String(), err)
 			}
 		}
@@ -4014,19 +4048,19 @@ func (stp *SubtreeProcessor) processRemainderTransactionsAndDequeue(ctx context.
 }
 
 // processOwnBlockNodes processes nodes when this was most likely our own block
-func (stp *SubtreeProcessor) processOwnBlockNodes(_ context.Context, block *model.Block, chainedSubtrees []*subtreepkg.Subtree, currentSubtree *subtreepkg.Subtree, currentTxMap TxInpointsMap, skipNotification bool) error {
+func (stp *SubtreeProcessor) processOwnBlockNodes(ctx context.Context, block *model.Block, chainedSubtrees []*subtreepkg.Subtree, currentSubtree *subtreepkg.Subtree, currentTxMap TxInpointsMap, skipNotification bool) error {
 	removeMapLength := stp.removeMap.Length()
 	coinbaseID := block.CoinbaseTx.TxIDChainHash()
 
 	// Process nodes from chained subtrees
 	for _, subtree := range chainedSubtrees {
-		if err := stp.processOwnBlockSubtreeNodes(block, subtree.Nodes, currentTxMap, removeMapLength, nil, skipNotification); err != nil {
+		if err := stp.processOwnBlockSubtreeNodes(ctx, block, subtree.Nodes, currentTxMap, removeMapLength, nil, skipNotification); err != nil {
 			return err
 		}
 	}
 
 	// Process nodes from current subtree
-	if err := stp.processOwnBlockSubtreeNodes(block, currentSubtree.Nodes, currentTxMap, removeMapLength, coinbaseID, skipNotification); err != nil {
+	if err := stp.processOwnBlockSubtreeNodes(ctx, block, currentSubtree.Nodes, currentTxMap, removeMapLength, coinbaseID, skipNotification); err != nil {
 		return err
 	}
 
@@ -4036,7 +4070,7 @@ func (stp *SubtreeProcessor) processOwnBlockNodes(_ context.Context, block *mode
 // processOwnBlockSubtreeNodes processes nodes from a subtree for our own block.
 // For large node sets (>= ParallelSetIfNotExistsThreshold), uses parallel processing
 // for Get and SetIfNotExists operations to improve performance.
-func (stp *SubtreeProcessor) processOwnBlockSubtreeNodes(block *model.Block, nodes []subtreepkg.Node, currentTxMap TxInpointsMap, removeMapLength int, coinbaseID *chainhash.Hash, skipNotification bool) error {
+func (stp *SubtreeProcessor) processOwnBlockSubtreeNodes(ctx context.Context, block *model.Block, nodes []subtreepkg.Node, currentTxMap TxInpointsMap, removeMapLength int, coinbaseID *chainhash.Hash, skipNotification bool) error {
 	parallelThreshold := stp.settings.BlockAssembly.ParallelSetIfNotExistsThreshold
 
 	if len(nodes) >= parallelThreshold {
@@ -4062,7 +4096,7 @@ func (stp *SubtreeProcessor) processOwnBlockSubtreeNodes(block *model.Block, nod
 				continue
 			}
 
-			if err := stp.addNodePreValidated(node, skipNotification); err != nil {
+			if err := stp.addNodePreValidated(ctx, node, skipNotification); err != nil {
 				return errors.NewProcessingError("[processOwnBlockSubtreeNodes][%s] error adding node %s to subtree", block.String(), node.Hash.String(), err)
 			}
 		}
@@ -4088,7 +4122,7 @@ func (stp *SubtreeProcessor) processOwnBlockSubtreeNodes(block *model.Block, nod
 					return errors.NewProcessingError("[moveForwardBlock][%s] error getting node txInpoints from currentTxMap for %s", block.String(), node.Hash.String())
 				}
 
-				if err := stp.addNode(node, nodeParents, skipNotification); err != nil {
+				if err := stp.addNode(ctx, node, nodeParents, skipNotification); err != nil {
 					return errors.NewProcessingError("[moveForwardBlock][%s] error adding node %s to subtree", block.String(), node.Hash.String(), err)
 				}
 			}
@@ -4484,7 +4518,7 @@ func (stp *SubtreeProcessor) dequeueDuringBlockMovement(transactionMap *SplitSwi
 					}
 				}
 
-				_ = stp.addNode(node, txInpoints, skipNotification)
+				_ = stp.addNode(context.Background(), node, txInpoints, skipNotification)
 			}
 
 			itemsProcessed += int64(len(batch.nodes))
@@ -4751,7 +4785,7 @@ func (stp *SubtreeProcessor) processRemainderTxHashes(ctx context.Context, chain
 					return errors.NewProcessingError("[processRemainderTxHashes] error getting node txInpoints from currentTxMap for %s", node.Hash.String())
 				}
 
-				_ = stp.addNode(node, parents, skipNotification)
+				_ = stp.addNode(ctx, node, parents, skipNotification)
 			}
 		}
 	}
@@ -4925,9 +4959,8 @@ func (stp *SubtreeProcessor) parallelBuildRemainderSubtrees(ctx context.Context,
 
 		stp.subtreesInBlock++
 
-		errCh := make(chan error)
-
-		stp.newSubtreeChan <- NewSubtreeRequest{
+		errCh := make(chan error, 1)
+		req := NewSubtreeRequest{
 			Subtree:           oldSubtree,
 			ParentTxMap:       stp.currentTxMap,
 			DeletedTxs:        stp.deletedTxs,
@@ -4935,12 +4968,19 @@ func (stp *SubtreeProcessor) parallelBuildRemainderSubtrees(ctx context.Context,
 			ErrChan:           errCh,
 			OnStorageComplete: func() { stp.cleanupDeletedTxs(oldSubtree) },
 		}
+		if err := stp.sendNewSubtreeRequest(ctx, req); err != nil {
+			return errors.NewProcessingError("[%s] error sending subtree to newSubtreeChan", oldSubtreeHash.String(), err)
+		}
 
-		go func(hash *chainhash.Hash) {
-			if err := <-errCh; err != nil {
-				stp.logger.Errorf("[%s] error sending subtree to newSubtreeChan: %v", hash.String(), err)
+		go func(hash *chainhash.Hash, requestCtx context.Context) {
+			select {
+			case err := <-errCh:
+				if err != nil {
+					stp.logger.Errorf("[%s] error sending subtree to newSubtreeChan: %v", hash.String(), err)
+				}
+			case <-requestCtx.Done():
 			}
-		}(oldSubtreeHash)
+		}(oldSubtreeHash, ctx)
 
 		if !skipNotification {
 			stp.resetAnnouncementTicker()

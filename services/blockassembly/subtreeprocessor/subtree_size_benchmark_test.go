@@ -65,7 +65,7 @@ func TestSubtreeProcessorSizePerformance(t *testing.T) {
 			// Time adding transactions directly (bypassing queue for consistent timing)
 			start := time.Now()
 			for i, hash := range txHashes {
-				err := stp.addNode(
+				err := stp.addNode(context.Background(),
 					subtreepkg.Node{Hash: hash, Fee: uint64(i), SizeInBytes: 250},
 					&subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
 					true, // skipNotification
@@ -283,7 +283,7 @@ func BenchmarkSubtreeProcessorAdd(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				_ = stp.addNode(
+				_ = stp.addNode(context.Background(),
 					subtreepkg.Node{Hash: benchmarkTxHashPool[i%benchmarkTxPoolSize], Fee: uint64(i), SizeInBytes: 250},
 					&subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
 					true,
@@ -322,7 +322,7 @@ func BenchmarkSubtreeProcessorRotate(b *testing.B) {
 			rotations := 0
 			for i := 0; i < b.N; i++ {
 				prevLen := len(stp.chainedSubtrees)
-				_ = stp.addNode(
+				_ = stp.addNode(context.Background(),
 					subtreepkg.Node{Hash: benchmarkTxHashPool[i%benchmarkTxPoolSize], Fee: uint64(i), SizeInBytes: 250},
 					&subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
 					true,
@@ -561,7 +561,7 @@ func BenchmarkSubtreeProcessorOverheadBreakdown(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				_ = stp.addNode(
+				_ = stp.addNode(context.Background(),
 					subtreepkg.Node{Hash: benchmarkTxHashPool[i%benchmarkTxPoolSize], Fee: uint64(i), SizeInBytes: 250},
 					&subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
 					true,
@@ -670,7 +670,7 @@ func TestOverheadBreakdownDetailed(t *testing.T) {
 
 		start := time.Now()
 		for i := 0; i < actualTxCount; i++ {
-			_ = stp.addNode(
+			_ = stp.addNode(context.Background(),
 				subtreepkg.Node{Hash: hashes[i], Fee: uint64(i), SizeInBytes: 250},
 				&subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{}},
 				true,
@@ -831,7 +831,7 @@ func BenchmarkProcessOwnBlockSubtreeNodesParallel(b *testing.B) {
 				stp.currentSubtree.Store(nil)
 				stp.chainedSubtrees = nil
 
-				_ = stp.processOwnBlockSubtreeNodes(block, nodes, currentTxMap, 0, nil, true)
+				_ = stp.processOwnBlockSubtreeNodes(context.Background(), block, nodes, currentTxMap, 0, nil, true)
 			}
 
 			b.StopTimer()
@@ -882,7 +882,7 @@ func BenchmarkProcessOwnBlockSubtreeNodesSequential(b *testing.B) {
 				stp.currentSubtree.Store(nil)
 				stp.chainedSubtrees = nil
 
-				_ = stp.processOwnBlockSubtreeNodes(block, nodes, currentTxMap, 0, nil, true)
+				_ = stp.processOwnBlockSubtreeNodes(context.Background(), block, nodes, currentTxMap, 0, nil, true)
 			}
 
 			b.StopTimer()

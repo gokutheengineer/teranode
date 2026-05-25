@@ -396,7 +396,7 @@ func TestReChainSubtrees(t *testing.T) {
 	for i := uint64(0); i < 42; i++ {
 		hash := chainhash.HashH([]byte(fmt.Sprintf("tx-%d", i)))
 		// Use the parent hash instead of self-reference to avoid duplicate skipping
-		_ = stp.addNode(subtreepkg.Node{Hash: hash, Fee: i}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{parentHash}}, true)
+		_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: hash, Fee: i}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{parentHash}}, true)
 	}
 
 	// With 42 unique transactions and 4 items per subtree:
@@ -1588,7 +1588,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 
 		// Directly add nodes using internal method since Start() is not running
 		for _, txHash := range txHashes {
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// there should be 4 chained subtrees
@@ -1934,7 +1934,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			txHash, err := generateTxHash()
 			require.NoError(t, err)
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// Create single subtree
@@ -2048,7 +2048,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			txHash, err := generateTxHash()
 			require.NoError(t, err)
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// Capture original state
@@ -2157,7 +2157,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			txHash, err := generateTxHash()
 			require.NoError(t, err)
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// Capture original state
@@ -2212,7 +2212,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			txHash, err := generateTxHash()
 			require.NoError(t, err)
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// Capture original state
@@ -2296,7 +2296,7 @@ func TestSubtreeProcessor_moveBackBlock(t *testing.T) {
 		for i := 0; i < 2; i++ {
 			txHash, err := generateTxHash()
 			require.NoError(t, err)
-			_ = stp.addNode(subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+			_ = stp.addNode(context.Background(), subtreepkg.Node{Hash: txHash, Fee: 1}, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 		}
 
 		// Capture original state
@@ -2972,7 +2972,7 @@ func TestSubtreeProcessor_DynamicSizeAdjustment(t *testing.T) {
 					Hash: txHash,
 				}
 
-				err = stp.addNode(node, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+				err = stp.addNode(context.Background(), node, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 				require.NoError(t, err)
 			}
 
@@ -3090,7 +3090,7 @@ func TestSubtreeProcessor_DynamicSizeAdjustmentFast(t *testing.T) {
 					Hash: txHash,
 				}
 
-				err = stp.addNode(node, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
+				err = stp.addNode(context.Background(), node, &subtreepkg.TxInpoints{ParentTxHashes: []chainhash.Hash{txHash}}, true)
 				require.NoError(t, err)
 			}
 
@@ -3684,7 +3684,7 @@ func TestAddNode_TransactionCounting(t *testing.T) {
 		parents := subtreepkg.TxInpoints{}
 
 		// Add the node
-		err := stp.addNode(node, &parents, false)
+		err := stp.addNode(context.Background(), node, &parents, false)
 		require.NoError(t, err)
 
 		// Verify transaction count changes appropriately
@@ -3715,13 +3715,13 @@ func TestAddNode_TransactionCounting(t *testing.T) {
 		parents := subtreepkg.TxInpoints{}
 
 		// Add the node first time
-		err := stp.addNode(node, &parents, false)
+		err := stp.addNode(context.Background(), node, &parents, false)
 		require.NoError(t, err)
 
 		initialTxCount := stp.TxCount()
 
 		// Add the same node again (duplicate)
-		err = stp.addNode(node, &parents, false)
+		err = stp.addNode(context.Background(), node, &parents, false)
 		require.NoError(t, err)
 
 		// Verify transaction count was not incremented for duplicate
@@ -3994,6 +3994,57 @@ func TestSubtreeProcessor_ErrorRecovery_ChannelOperations(t *testing.T) {
 		// The processor should not panic or get stuck
 		time.Sleep(100 * time.Millisecond) // Allow time for operations to complete
 	})
+}
+
+func TestProcessCompleteSubtree_ReturnsWhenAnnouncementChannelBlockedAndContextCancelled(t *testing.T) {
+	settings := test.CreateBaseTestSettings(t)
+	settings.BlockAssembly.InitialMerkleItemsPerSubtree = 2
+
+	newSubtreeChan := make(chan NewSubtreeRequest)
+	stp, err := NewSubtreeProcessor(context.Background(), ulogger.TestLogger{}, settings, nil, nil, nil, newSubtreeChan)
+	require.NoError(t, err)
+
+	subtree, err := subtreepkg.NewTreeByLeafCount(2)
+	require.NoError(t, err)
+	require.NoError(t, subtree.AddCoinbaseNode())
+	require.NoError(t, subtree.AddSubtreeNode(subtreepkg.Node{
+		Hash:        chainhash.HashH([]byte("complete-subtree-cancel")),
+		Fee:         1,
+		SizeInBytes: 100,
+	}))
+	stp.currentSubtree.Store(subtree)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err = stp.processCompleteSubtree(ctx, true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context canceled")
+	require.Less(t, time.Since(start), time.Second)
+}
+
+func TestAnnounceChainedSubtrees_ReturnsWhenChannelBlockedAndContextCancelled(t *testing.T) {
+	settings := test.CreateBaseTestSettings(t)
+	settings.BlockAssembly.InitialMerkleItemsPerSubtree = 2
+
+	newSubtreeChan := make(chan NewSubtreeRequest)
+	stp, err := NewSubtreeProcessor(context.Background(), ulogger.TestLogger{}, settings, nil, nil, nil, newSubtreeChan)
+	require.NoError(t, err)
+
+	subtree, err := subtreepkg.NewTreeByLeafCount(2)
+	require.NoError(t, err)
+	require.NoError(t, subtree.AddCoinbaseNode())
+	stp.chainedSubtrees = []*subtreepkg.Subtree{subtree}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err = stp.announceChainedSubtrees(ctx)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "context canceled")
+	require.Less(t, time.Since(start), time.Second)
 }
 
 // TestCreateTransactionMapBenchmark benchmarks the CreateTransactionMap function with CPU and memory profiling.

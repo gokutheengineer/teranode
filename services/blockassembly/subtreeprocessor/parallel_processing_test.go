@@ -275,7 +275,7 @@ func TestProcessOwnBlockSubtreeNodesParallelPath(t *testing.T) {
 		Header: blockHeader,
 	}
 
-	err := stp.processOwnBlockSubtreeNodes(block, nodes, currentTxMap, 0, nil, true)
+	err := stp.processOwnBlockSubtreeNodes(t.Context(), block, nodes, currentTxMap, 0, nil, true)
 	require.NoError(t, err)
 
 	// Verify all nodes were added to currentTxMap
@@ -305,7 +305,7 @@ func TestProcessOwnBlockSubtreeNodesSequentialPath(t *testing.T) {
 		Header: blockHeader,
 	}
 
-	err := stp.processOwnBlockSubtreeNodes(block, nodes, currentTxMap, 0, nil, true)
+	err := stp.processOwnBlockSubtreeNodes(t.Context(), block, nodes, currentTxMap, 0, nil, true)
 	require.NoError(t, err)
 
 	// Verify all nodes were added to currentTxMap

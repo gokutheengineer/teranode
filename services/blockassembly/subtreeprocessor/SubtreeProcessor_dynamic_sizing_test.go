@@ -417,7 +417,7 @@ func TestSubtreeProcessor_CompleteSubtreeTracking(t *testing.T) {
 		}
 
 		// Process the complete subtree
-		err = stp.processCompleteSubtree(false)
+		err = stp.processCompleteSubtree(context.Background(), false)
 		require.NoError(t, err)
 
 		// Should have tracked 5 nodes (including coinbase)
@@ -464,7 +464,7 @@ func TestSubtreeProcessor_CompleteSubtreeTracking(t *testing.T) {
 		}
 
 		// This should add one more, reaching 18 (full buffer)
-		err = stp.processCompleteSubtree(false)
+		err = stp.processCompleteSubtree(context.Background(), false)
 		require.NoError(t, err)
 
 		// Count values in ring
@@ -493,7 +493,7 @@ func TestSubtreeProcessor_CompleteSubtreeTracking(t *testing.T) {
 		err = stp.currentSubtree.Load().AddSubtreeNode(node)
 		require.NoError(t, err)
 
-		err = stp.processCompleteSubtree(false)
+		err = stp.processCompleteSubtree(context.Background(), false)
 		require.NoError(t, err)
 
 		// Should still be at max 18 samples (ring automatically overwrites oldest)
