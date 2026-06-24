@@ -25,6 +25,18 @@ const (
 	GetAllBlocked
 
 	DefaultSkipCount = 10
+
+	// allBlockedRepollInterval bounds how long WaitForBlock parks while every
+	// queued block is fork-blocked (GetAllBlocked). Blocks become processable
+	// when an in-flight block finishes (ForkManager.FinishProcessingBlock /
+	// BlockProcessingGuard.Release), which calls Signal() while holding the
+	// fork manager's lock — NOT pq.mu — and the "some block is processable"
+	// predicate cannot be re-checked under pq.mu. That signal can therefore be
+	// lost in the window between Get() returning and cond.Wait(), so a plain
+	// indefinite wait could park forever with processable blocks queued. A
+	// bounded wait degrades a lost wakeup to a brief re-poll instead of a
+	// deadlock, while still avoiding the 100% CPU busy-loop.
+	allBlockedRepollInterval = 100 * time.Millisecond
 )
 
 type BlockPriority int
@@ -261,19 +273,49 @@ func (pq *BlockPriorityQueue) WaitForBlock(ctx context.Context, bp BlockProcesso
 		case GetOK:
 			return block, status
 		case GetEmpty, GetAllBlocked:
-			// Both empty queue and all-blocked should wait on condition variable
-			// to avoid busy loop burning CPU
+			// Both empty queue and all-blocked should wait on the condition
+			// variable to avoid a busy loop burning CPU.
 			pq.mu.Lock()
 
-			// Double-check queue status after acquiring lock
-			// Items might have been added between Get() and Lock()
-			if len(pq.items) > 0 {
+			// Double-check queue status after acquiring lock. A block can only
+			// appear via Add()/RequeueForRetry(), which mutate pq.items and
+			// Signal() under pq.mu, so re-checking len(pq.items) here closes the
+			// wakeup race for the empty-queue case.
+			//
+			// This short-circuit must be gated on GetEmpty only. For
+			// GetAllBlocked the queue is non-empty by definition, so an
+			// unconditional `len(pq.items) > 0` check would always `continue`
+			// and re-enter Get() immediately — the busy loop this function is
+			// meant to avoid (issue #4657). GetAllBlocked must fall through and
+			// actually wait on the condition variable.
+			if status == GetEmpty && len(pq.items) > 0 {
 				pq.mu.Unlock()
 				continue // Items appeared, try Get() again
 			}
 
 			waitCh := make(chan struct{})
 			go func() {
+				// For GetAllBlocked, bound the wait: the unblock Signal is sent
+				// under the fork manager's lock (not pq.mu) and can be lost in
+				// the gap between Get() and cond.Wait(), so we re-poll after a
+				// short interval instead of risking a permanent park. The
+				// empty-queue case is woken losslessly by Add()/RequeueForRetry()
+				// under pq.mu, so it waits indefinitely.
+				if status == GetAllBlocked {
+					timer := time.NewTimer(allBlockedRepollInterval)
+					defer timer.Stop()
+
+					select {
+					case <-ctx.Done():
+						pq.cond.Broadcast()
+					case <-timer.C:
+						pq.cond.Broadcast()
+					case <-waitCh:
+					}
+
+					return
+				}
+
 				select {
 				case <-ctx.Done():
 					pq.cond.Broadcast()

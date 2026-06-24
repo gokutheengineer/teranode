@@ -374,3 +374,57 @@ func TestForkManager_CanProcessBlock_EdgeCases(t *testing.T) {
 		assert.False(t, canProcess, "Fork already has a processing block")
 	})
 }
+
+// TestBlockPriorityQueue_WaitForBlock_AllBlockedDoesNotBusyLoop is a regression
+// test for issue #4657: when the queue is non-empty but every block is blocked
+// by the fork manager (GetAllBlocked), WaitForBlock must park on the condition
+// variable instead of spinning in a tight loop re-calling Get()/CanProcessBlock.
+func TestBlockPriorityQueue_WaitForBlock_AllBlockedDoesNotBusyLoop(t *testing.T) {
+	initPrometheusMetrics()
+	logger := ulogger.TestLogger{}
+	pq := NewBlockPriorityQueue(logger)
+	mockBP := NewMockBlockProcessor()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Queue a single block that the fork manager refuses to process, so Get()
+	// returns GetAllBlocked on every call (queue non-empty, nothing processable).
+	hash := &chainhash.Hash{}
+	hash[0] = 1
+	mockBP.SetCanProcess(hash, false)
+	pq.Add(processBlockFound{hash: hash}, PriorityDeepFork, 1000)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	var gotBlock processBlockFound
+	var gotStatus GetStatus
+
+	go func() {
+		defer wg.Done()
+		gotBlock, gotStatus = pq.WaitForBlock(ctx, mockBP)
+	}()
+
+	// Let the worker run while everything is blocked. With the busy-loop bug the
+	// worker would re-enter Get() (and thus CanProcessBlock) millions of times;
+	// with the fix it parks and only re-polls on the bounded backstop interval.
+	const observeFor = 300 * time.Millisecond
+	time.Sleep(observeFor)
+
+	blockedCalls := mockBP.GetCallCount()
+	// Allow generous headroom over the expected handful of backstop re-polls
+	// (~observeFor/allBlockedRepollInterval) while still being orders of
+	// magnitude below a spin loop.
+	require.Less(t, blockedCalls, 50,
+		"WaitForBlock busy-looped while all blocks were fork-blocked: %d CanProcessBlock calls in %s",
+		blockedCalls, observeFor)
+
+	// Now make the block processable and wake the worker; it must return GetOK.
+	mockBP.SetCanProcess(hash, true)
+	pq.Signal()
+
+	wg.Wait()
+
+	assert.Equal(t, GetOK, gotStatus)
+	assert.Equal(t, hash, gotBlock.hash)
+}
