@@ -944,6 +944,8 @@
       
         
       
+        
+      
     
     
     
@@ -1423,6 +1425,34 @@
     <span class="md-ellipsis">
       
         Production Considerations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Production Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scaling-the-propagation-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling the Propagation Service
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Documentation
       
     </span>
   </a>
@@ -2478,6 +2508,34 @@
   
   
   
+    <li class="md-nav__item">
+      <a href="../../minersHowToMonitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
     
     
       
@@ -2504,10 +2562,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_11_9" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_11_10" >
         
           
-          <label class="md-nav__link" for="__nav_2_11_9" id="__nav_2_11_9_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2_11_10" id="__nav_2_11_10_label" tabindex="0">
             
   
   
@@ -2525,8 +2583,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_11_9_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_11_9">
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_11_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_11_10">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -7212,6 +7270,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Production Considerations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scaling-the-propagation-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scaling the Propagation Service
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related Documentation
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -7371,7 +7457,10 @@
 </ul>
 </li>
 <li><a href="#verifying-the-deployment">Verifying the Deployment</a></li>
-<li><a href="#production-considerations">Production Considerations</a></li>
+<li><a href="#production-considerations">Production Considerations</a><ul>
+<li><a href="#scaling-the-propagation-service">Scaling the Propagation Service</a></li>
+</ul>
+</li>
 <li><a href="#other-resources">Other Resources</a></li>
 </ul>
 <h2 id="introduction">Introduction<a class="headerlink" href="#introduction" title="Permanent link">&para;</a></h2>
@@ -7528,6 +7617,12 @@ rotate the database credentials for production deployments.</p>
 </span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">          </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">100m</span>
 </span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">          </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">256Mi</span>
 </span></code></pre></div>
+<p>The <code>imagePullPolicy: Never</code> and <code>cpu: 100m</code> / <code>memory: 256Mi</code> values above
+are Minikube/local-dev defaults — the legacy service scans the full
+historical chain and needs far more than that in practice. For testnet or
+mainnet, size resources from the shipped mainnet CR instead, which requests
+<code>cpu: 2</code> / <code>memory: 64Gi</code> for legacy: see
+<a href="https://github.com/bsv-blockchain/teranode/blob/main/deploy/kubernetes/teranode/teranode-cr-mainnet.yaml">teranode-cr-mainnet.yaml</a>.</p>
 </li>
 <li>
 <p>Apply the updated configuration:</p>
@@ -7558,11 +7653,47 @@ rotate the database credentials for production deployments.</p>
 <ul>
 <li>Deploying dependencies (Aerospike, PostgreSQL, Kafka) in separate clusters or using managed services</li>
 <li>Implementing proper security measures (network policies, RBAC, etc.)</li>
-<li>Setting up monitoring and alerting</li>
+<li>Setting up <a href="../../minersHowToMonitoring/">monitoring and alerting</a></li>
 <li>Configuring appropriate resource requests and limits</li>
 <li>Setting up proper backup and disaster recovery procedures</li>
 </ul>
 <p>An example CR for a mainnet deployment is available in <a href="https://github.com/bsv-blockchain/teranode/blob/main/deploy/kubernetes/teranode/teranode-cr-mainnet.yaml">kubernetes/teranode/teranode-cr-mainnet.yaml</a>.</p>
+<h3 id="scaling-the-propagation-service">Scaling the Propagation Service<a class="headerlink" href="#scaling-the-propagation-service" title="Permanent link">&para;</a></h3>
+<p>The propagation service is stateless and horizontally scalable: set
+<code>propagation.enabled: true</code> (both shipped example CRs ship it disabled) and
+<code>propagation.spec.deploymentOverrides.replicas</code> in <code>teranode-cr.yaml</code> (or
+<code>teranode-cr-mainnet.yaml</code>) to the desired pod count, then re-apply the CR. If
+the propagation spec has no <code>deploymentOverrides</code> block yet — as in
+<code>teranode-cr.yaml</code> — add one.</p>
+<p>Not every service in the Cluster CR can be scaled this way. The validator can:
+<code>teranode-cr-mainnet.yaml</code> runs it with 8 replicas (<code>teranode-cr.yaml</code> ships the
+validator disabled, with an empty spec). Services such as block assembly and
+blockchain are single-instance — block assembly holds the mining jobs handed to
+miners and its assembler state per process, so a second replica would lose
+solved blocks and clobber that state. That is why every
+<code>deploymentOverrides.replicas</code> entry in both example CRs is <code>1</code>, the one
+exception being the validator in <code>teranode-cr-mainnet.yaml</code>.</p>
+<p>A <code>HorizontalPodAutoscaler</code> that targets the <code>Propagation</code> custom resource's
+<code>/scale</code> endpoint will not work. The Teranode Operator's <code>Propagation</code> CR does
+declare a Kubernetes <code>/scale</code> subresource, with its <code>specReplicasPath</code> pointing
+at <code>.spec.deploymentOverrides.replicas</code>, which is the mechanism an HPA would
+normally use to target a custom resource directly. In practice this doesn't hold
+up: the parent <code>Cluster</code> controller reconciles every child resource, including
+<code>Propagation</code>, both on a fixed one-minute timer and whenever the <code>Propagation</code>
+object's spec changes (which an HPA writing to <code>/scale</code> would trigger). On each
+of those reconciles it overwrites the entire <code>Propagation</code> spec — including the
+replica count — with whatever is stored in the <code>Cluster</code> CR itself. Any replica
+count an HPA writes to <code>/scale</code> gets reverted within at most a minute, so
+autoscaling against that endpoint silently flaps rather than converging.</p>
+<p>Until the operator changes this reconcile behavior (e.g. by leaving
+externally-managed replica counts alone), manual scaling via
+<code>deploymentOverrides.replicas</code> in the <code>Cluster</code> CR remains the supported way to
+size the propagation service.</p>
+<h2 id="related-documentation">Related Documentation<a class="headerlink" href="#related-documentation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../minersHowToMonitoring/">Monitoring Teranode</a></li>
+<li><a href="../../../../references/prometheusMetrics/">Prometheus Metrics Reference</a></li>
+</ul>
 <h2 id="resetting-teranode">Resetting Teranode<a class="headerlink" href="#resetting-teranode" title="Permanent link">&para;</a></h2>
 <p>If you need to reset your Teranode deployment, see the <a href="../minersHowToResetTeranode/">How to Reset Teranode</a> guide for complete instructions on cleaning up Aerospike, PostgreSQL, and persistent volumes.</p>
 <h2 id="other-resources">Other Resources<a class="headerlink" href="#other-resources" title="Permanent link">&para;</a></h2>
